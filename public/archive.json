@@ -1,0 +1,57 @@
+{
+  "$schema": "./archive.schema.json",
+  "collection": "CACHE 01 — HALIFAX APPROACHES",
+  "base": "https://caches.wastelandprops.com/",
+  "entries": [
+    {
+      "id": "WP-C-0001",
+      "title": "Dry dock — mooring chain, wet",
+      "file": "cache-01/mooring-chain-wet.flac",
+      "tags": [
+        "field",
+        "metal"
+      ],
+      "loc": "44.6650 -63.5870",
+      "date": "2026-03-11",
+      "notes": "Half-tide. Chain under load, hull groan underneath at 31 Hz.",
+      "license": "CC BY-NC 4.0 — commercial on request",
+      "master": "cache-01/mooring-chain-wet-32f.wav"
+    },
+    {
+      "id": "WP-C-0002",
+      "title": "Grain elevator — empty silo, clap",
+      "file": "cache-01/silo-clap-ir.flac",
+      "tags": [
+        "field",
+        "room"
+      ],
+      "loc": "44.6389 -63.5620",
+      "date": "2026-02-27",
+      "notes": "Impulse pair, 11 s tail. Cut for reverb capture.",
+      "license": "CC BY-NC 4.0 — commercial on request",
+      "master": "cache-01/silo-clap-ir-32f.wav"
+    },
+    {
+      "id": "WP-K-0007",
+      "title": "FATHOM kit — Ferry slip 02",
+      "file": "kits/ferry-slip-02.wav",
+      "tags": [
+        "kit"
+      ],
+      "date": "2026-04-02",
+      "notes": "16 pads extracted from a four-minute slip recording.",
+      "license": "Ships with UNIT·FATHOM"
+    },
+    {
+      "id": "WP-W-0003",
+      "title": "LATHE table — Transformer hum, oxidised",
+      "file": "wavetables/transformer-oxide.wav",
+      "tags": [
+        "wavetable"
+      ],
+      "date": "2026-04-19",
+      "notes": "256 frames. Serum / Vital / Surge XT compatible.",
+      "license": "Ships with UNIT·LATHE"
+    }
+  ]
+}

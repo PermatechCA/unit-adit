@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UNIT·ADIT archive manifest",
+  "type": "object",
+  "required": [
+    "collection",
+    "entries"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "collection": {
+      "type": "string",
+      "description": "Shown in the status strip. Name the cache, not the site."
+    },
+    "base": {
+      "type": "string",
+      "description": "Prefix joined to every relative file path. Usually the R2 public host."
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "file"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^WP-[A-Z]-[0-9]{4}$",
+            "description": "WP-C core, WP-K kit, WP-W wavetable."
+          },
+          "title": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string",
+            "description": "What plays. Relative to base, or an absolute https URL. FLAC is half the weight of PCM and every current browser decodes it."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Seams. First five distinct tags become filter buttons."
+          },
+          "loc": {
+            "type": "string",
+            "description": "Decimal lat lon, space separated."
+          },
+          "date": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "license": {
+            "type": "string"
+          },
+          "master": {
+            "type": "string",
+            "description": "Optional. What the download button pulls instead of file — normally the 32-bit float WAV, since FLAC is integer-only and cannot carry headroom above 0 dBFS."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
