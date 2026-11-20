@@ -49,6 +49,25 @@ FATHOM depth · ADIT through.)
    `unhandledrejection` listeners are the only thing that reports a fault on
    `file://`, where the browser sanitises everything to "Script error."
 
+## Inside Public Workbench (`window.__workbench` present)
+
+8. **The library mode only reads other tools' files.** FIELD (`recordings/`), PS-1 (`library/`) and the
+   shelf (`shelf/<tool>/`). It writes only `shelf/adit/` (files the user opens) and `shelf/_handoff/`. Never
+   edit, rename or delete another tool's file, and never list a FIELD take whose sidecar isn't `done`
+   (it's locked while recording).
+9. **Library paths stay relative** (`../wb/build.json`, `../<tool>/?handoff`). Workbench's build refuses
+   root paths.
+10. Outside Workbench nothing changes: the archive is a shelf, local files stay behind `?log`.
+11. **A hand-off is always 32-bit float WAV built from samples**, never the source bytes passed through.
+    An archive core sends its float **master** (the same file its download gives), because the FLAC
+    stream is integer and has already lost the headroom. The A/B region, if marked, is cut from those
+    samples. Doctrine 5 applies across the hand-off too.
+12. **Another tool's sidecar is data, not a promise.** Each one is read inside its own `try`, and
+    `Library.scan()` never throws. One half-written or differently shaped file must not stop ADIT
+    booting inside Workbench; the reference build once died on a FIELD location with no `lon`.
+13. **Library text reaches the page as text.** File names, FIELD notes and other tools' tags go through
+    `esc()` before any `innerHTML`. That origin holds every Workbench tool's files.
+
 ## Harnesses — run before every commit
 
 ```
@@ -69,8 +88,9 @@ Counts are for `public/index.html`.
 | grep | expected |
 |---|---|
 | `createOscillator` | **0** — doctrine 1 |
-| `localStorage` | **0** — blocked in the artifact sandbox, unused here |
-| `parseWav` | **2** — one definition, one call in `decode()` |
+| `localStorage` | **2** — the Workbench hand-off note: one `setItem`, one comment. Library mode only; blocked in the artifact sandbox, where library mode never runs |
+| `parseWav` | **3** — definition, the call in `decode()`, and the hand-off reading a float master (rule 11) |
+| `workbench-accepts` | **0** — Workbench's build would read it as ADIT accepting sound, comments included |
 | `decodeAudioData` | **2** — comment + the FLAC/lossy branch only |
 | `logCore(` | **2** — definition and the call in `selectEntry` |
 | `copyToChannel` | **1** — the only route from parsed samples into an AudioBuffer |

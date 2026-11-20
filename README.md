@@ -74,6 +74,21 @@ silently writes to the local simulator while reporting success. Stereo 24-bit/96
 kHz is about 35 MB per minute as WAV and 46 MB as 32-bit float, so a five-minute
 recording is an R2 object either way.
 
+## Inside Public Workbench: the library
+
+At `workbench.wastelandprops.com/adit/` ADIT is the library for every Workbench tool. Workbench's
+corner-mark script sets `window.__workbench`; when it's there, ADIT:
+
+- lists **your own work first**: FIELD's finished takes (with category, place and coordinates), PS-1's
+  loops, and anything a tool keeps on the shelf (`shelf/<tool>/`). The Wasteland Props archive follows,
+  tagged ARCHIVE;
+- **keeps files you open** (Open files, or drop) in `shelf/adit/`, so every tool can reach them;
+- offers **Send to** for each tool that takes sound: the core on the head, or its A/B region, always as
+  32-bit float WAV. An archive core sends its float master, the same file its download gives.
+
+It reads other tools' files and never changes them. The full contract is in Workbench's `WORKBENCH.md`.
+At `adit.wastelandprops.com` none of this happens: ADIT is the archive, as before.
+
 ## Reading local files
 
 The archive is a shelf, not a workshop — visitors cannot load their own audio.

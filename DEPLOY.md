@@ -228,6 +228,7 @@ Dashboard → **R2 → wasteland-caches → Settings → CORS Policy → Edit**:
   {
     "AllowedOrigins": [
       "https://adit.wastelandprops.com",
+      "https://workbench.wastelandprops.com",
       "https://unit-adit.<your-subdomain>.workers.dev"
     ],
     "AllowedMethods": ["GET", "HEAD"],
@@ -239,6 +240,11 @@ Dashboard → **R2 → wasteland-caches → Settings → CORS Policy → Edit**:
 ```
 
 Include the `workers.dev` origin as well — §6a happens there, before the domain exists.
+
+> ⚠️ **Public Workbench is a second origin for the same cores.** At
+> `workbench.wastelandprops.com/adit/` the archive is fetched with Workbench as the origin, so it needs
+> its own line above. Without it the library lists your own work fine and every ARCHIVE core reads `ERR`.
+> A Workbench preview on its own `workers.dev` URL needs its line too.
 
 > ⚠️ **A CORS failure looks identical to a wrong path.** Every core in the log shows `ERR`,
 > the stamp reads a fetch error, and nothing appears in the Cloudflare logs because the
@@ -301,6 +307,24 @@ differently over HTTPS than it does locally, so none of it can be checked before
 > ⚠️ `file://` fails earlier than that here: ES modules and `fetch` are both blocked on an
 > opaque origin, so the import map never resolves. The boot panel says so. Locally, serve it
 > — `python3 -m http.server 8080` from `public/`.
+
+---
+
+## 6b. Inside Public Workbench (`workbench.wastelandprops.com/adit/`)
+
+Workbench's own build ships ADIT there; this repo's job is to hand it a passing build. Once Workbench
+is deployed, check these on its origin. The contract is Workbench's `WORKBENCH.md`.
+
+| Check | Expected | If it fails |
+|---|---|---|
+| Strip reads `LIBRARY  N YOURS · M ARCHIVE` | FIELD takes, PS-1 loops and shelf items first, newest first, then the archive tagged ARCHIVE | `window.__workbench` not set: Workbench's corner-mark script must run before ADIT's module |
+| Archive cores in the library | they read, no `ERR` | R2 CORS is missing the Workbench origin — §5a |
+| A FIELD take still recording | not listed | — |
+| **Open files**, then reload | the file is still listed, tagged OPENED | the browser can't write files (Safari before 26): the hint says so and keeps it for the session only |
+| **Send to** row | hidden until some tool declares it takes audio; then one button per such tool | Workbench's `wb/build.json` |
+| Send a core with A/B marked | the tool opens with just that region, as 32-bit float | — |
+| Copy-link key | works | Workbench's headers need `clipboard-write=(self)` as in §1a: ADIT's `_headers` does not apply on Workbench's site |
+| iPhone 390 px | nothing past the right edge, Open files on screen, IDLE/READING visible in the strip | the phone block in `build/shell.html` |
 
 ---
 

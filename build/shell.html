@@ -79,6 +79,9 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%;touch-action:
 #strip .cell.mark{color:var(--ink);background:var(--amber);font-weight:600}
 #strip .grow{flex:1;background:var(--ink)}
 #strip .cell.warn v{color:var(--alarm)}
+/* Inside Public Workbench's installed app a 44 px mark sits in the top-left corner (html[data-workbench="app"],
+   --wb-mark-inset is the width it needs): the strip starts after it. */
+html[data-workbench="app"] #strip{margin-left:max(0px, calc(var(--wb-mark-inset, 0px) - var(--pad, 0px)))}
 .blink{display:inline-block;width:6px;height:11px;background:var(--amber);vertical-align:-1px;
   animation:bl 1.1s steps(1) infinite}
 @keyframes bl{50%{opacity:0}}
@@ -153,6 +156,15 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%;touch-action:
 /* ─── DECK (transport) ──────────────────────────────────────────────────── */
 #deck{grid-area:deck}
 #deckrow{display:flex;align-items:center;gap:var(--pad);padding:var(--pad)}
+/* SEND: only inside Public Workbench, and only to tools that take a sound */
+#sendrow{display:flex;align-items:center;gap:calc(var(--u)*2);padding:0 var(--pad) var(--pad);flex-wrap:wrap;
+  font-size:var(--tick);letter-spacing:.2em;text-transform:uppercase;color:var(--ash)}
+#sendrow[hidden]{display:none}
+#sendkeys{display:flex;gap:calc(var(--u)*2);flex-wrap:wrap}
+#sendrow .snd{min-height:44px;padding:0 calc(var(--u)*4);background:transparent;color:var(--amber);border:1px solid var(--oxide);
+  font:inherit;letter-spacing:.16em;cursor:pointer}
+#sendrow .snd:hover,#sendrow .snd:focus-visible{border-color:var(--amber);outline:none}
+#sendrow .snd[disabled]{color:var(--ash-lo);border-color:var(--rule);cursor:not-allowed}
 .keys{display:flex;gap:1px;background:var(--rule);border:1px solid var(--rule)}
 .key{width:34px;height:30px;background:var(--ink);border:0;color:var(--bone);cursor:pointer;
   display:grid;place-items:center;font:inherit;font-size:11px;letter-spacing:0}
@@ -264,7 +276,19 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%;touch-action:
   .row .t{font-size:13px}
   .row .dl{opacity:1;width:40px;height:40px;font-size:15px}
   #idxfoot{min-height:48px}
-  #idxfoot button{padding:9px 12px;min-height:36px}
+  #idxfoot button{padding:9px 12px;min-height:44px;flex:none}
+  /* 1fr alone is "at least as wide as the content": the nowrap strip and the key row pushed the whole HUD,
+     and the Open files button, past the right edge of a 390 px phone. */
+  #hud{grid-template-columns:minmax(0,1fr)}
+  #strip{min-width:0;overflow:hidden}
+  /* With the strip clipped, the collection name is the cell that gives way: the mini meters and the
+     transport state are the only level and state readouts a phone has, so they keep their width. */
+  #strip > .cell{flex:none}
+  #strip > .cell.coll{flex:0 1 auto;min-width:0;overflow:hidden}
+  #strip > .cell.coll span{flex:none}
+  #s-coll{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  #s-hint{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .keys .key{min-width:0}
 
   #deckrow{display:grid;grid-template-columns:auto 1fr;align-items:center;
     grid-template-areas:"ruler ruler" "clock clock" "keys keys" "trimlab trim";
@@ -294,7 +318,7 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%;touch-action:
 
   <div id="strip" role="status" aria-live="polite">
     <div class="cell mark">UNIT·ADIT</div>
-    <div class="cell"><span>ARCHIVE ACCESS</span><v id="s-coll">—</v></div>
+    <div class="cell coll"><span>ARCHIVE ACCESS</span><v id="s-coll">—</v></div>
     <div class="cell hide-s"><span>FORMAT</span><v id="s-fmt">—</v></div>
     <div class="cell hide-s"><span>RATE</span><v id="s-rate">—</v></div>
     <div class="cell hide-s"><span>ENGINE</span><v id="s-ctx">—</v></div>
@@ -356,6 +380,7 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%;touch-action:
       <div class="clock" id="trimbox"><s>TRIM</s> <b id="c-gain">0.0</b><s>dB</s></div>
       <input id="gain" type="range" min="-24" max="6" step="0.5" value="0" aria-label="Output trim in decibels">
     </div>
+    <div id="sendrow" hidden><span>Send to</span><span id="sendkeys"></span><span id="sendnote">· the A/B region if one is marked</span></div>
   </section>
 
 </div>
