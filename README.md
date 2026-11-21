@@ -44,6 +44,7 @@ Put the audio somewhere reachable over HTTPS, then list it in
   "title": "Dry dock — mooring chain, wet",
   "file":   "cache-01/mooring-chain-wet.flac",
   "master": "cache-01/mooring-chain-wet-32f.wav",
+  "category": "field",
   "tags": ["field", "metal"],
   "loc": "44.6650 -63.5870",
   "date": "2026-03-11",
@@ -59,7 +60,11 @@ natively, but it is integer-only and cannot carry the headroom above 0 dBFS that
 this unit exists to preserve.
 
 `base` is joined to every relative path; absolute `https://` URLs are used as-is.
-The first five distinct `tags` become the seam filters.
+The filter bar is fixed: **ALL · FIELD · SAMPLES · STRIP · KIT · WAVES**. Set `"category"` on a core
+(`field`, `samples`, `strip`, `kit`, `waves`); without it a core is `field`. `tags` stay on the row
+and are searched, but no longer make buttons. Inside Workbench, your own work sorts itself: FIELD
+takes under FIELD, PS-1 loops and files you open under SAMPLES, SLUICE stems under STRIP, FATHOM
+kits under KIT, LATHE tables under WAVES. A category with nothing in it shows, dimmed.
 
 ### Where to put the audio
 

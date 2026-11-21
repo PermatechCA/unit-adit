@@ -4,7 +4,7 @@
 
    node test/manifest.js                                                      */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT } from '../build/make.mjs';
 
@@ -18,7 +18,7 @@ catch (e){ ok(false, 'archive.json is valid JSON — ' + e.message); process.exi
 try { schema = JSON.parse(read('public/archive.schema.json')); ok(true, 'archive.schema.json is valid JSON'); }
 catch (e){ ok(false, 'archive.schema.json is valid JSON — ' + e.message); process.exit(1); }
 
-/* enough of draft-07 for this schema: type, required, pattern, additionalProperties */
+/* enough of draft-07 for this schema: type, required, pattern, enum, additionalProperties */
 function validate(node, sch, path, errs){
   if (sch.type === 'object'){
     if (typeof node !== 'object' || node === null || Array.isArray(node))
@@ -37,6 +37,8 @@ function validate(node, sch, path, errs){
     if (typeof node !== 'string') return errs.push(`${path} should be a string`);
     if (sch.pattern && !new RegExp(sch.pattern).test(node))
       errs.push(`${path} "${node}" does not match ${sch.pattern}`);
+    if (sch.enum && !sch.enum.includes(node))
+      errs.push(`${path} "${node}" is not one of ${sch.enum.join(', ')}`);
   }
 }
 const errs = [];
@@ -76,11 +78,30 @@ const relative = manifest.entries.some(e =>
 ok(!relative || !!manifest.base,
    relative ? `relative paths resolve against base "${manifest.base}"` : 'all paths absolute');
 
-if (manifest.base){
+/* Two kinds of base. An https host (the R2 cache) for anything big. Or a relative folder beside the
+   app, "audio/": same origin, no CORS, and it follows ADIT to /adit/ inside Workbench. A root path
+   ("/audio/") would break there, and Workbench's build refuses them. */
+const local = manifest.base && !/^https?:/i.test(manifest.base);
+if (manifest.base && !local){
   ok(/^https:\/\//.test(manifest.base) && manifest.base.endsWith('/'),
      `base is an https host ending in a slash — "${manifest.base}"`);
   ok(!manifest.base.includes('adit.wastelandprops.com'),
      'base points at the cache host, not at the app origin');
+}
+if (local){
+  ok(/^[a-z0-9][\w.-]*(\/[\w.-]+)*\/$/i.test(manifest.base) && !manifest.base.includes('..'),
+     `base is a relative folder ending in a slash, no root path — "${manifest.base}"`);
+  /* a missing file here deploys fine and plays as ERR; Cloudflare refuses any asset over 25 MiB */
+  const paths = manifest.entries.flatMap(e => [e.file, e.master]).filter(p => p && !/^https?:/i.test(p));
+  const missing = [], big = [];
+  for (const p of paths){
+    try { const st = statSync(join(ROOT, 'public', manifest.base, p)); if (st.size > 25 * 1024 * 1024) big.push(p); }
+    catch (_){ missing.push(p); }
+  }
+  ok(missing.length === 0, missing.length ? `missing from public/${manifest.base}: ${missing.join(', ')}`
+                                          : `all ${paths.length} files present in public/${manifest.base}`);
+  ok(big.length === 0, big.length ? `over Cloudflare's 25 MiB asset cap, move to R2: ${big.join(', ')}`
+                                  : 'every file under the 25 MiB asset cap');
 }
 
 ok(manifest.entries.every(e => e.title && e.title.length <= 64),

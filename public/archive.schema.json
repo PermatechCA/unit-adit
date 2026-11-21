@@ -16,7 +16,7 @@
     },
     "base": {
       "type": "string",
-      "description": "Prefix joined to every relative file path. Usually the R2 public host."
+      "description": "Prefix joined to every relative file path. \"audio/\" serves short pieces from public/audio/ beside the app (same origin, nothing to configure); an https R2 host for anything over Cloudflare's 25 MiB asset cap. Never a root path like \"/audio/\": inside Workbench ADIT lives at /adit/."
     },
     "entries": {
       "type": "array",
@@ -44,7 +44,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Seams. First five distinct tags become filter buttons."
+            "description": "Seams: shown on the row and searched. The filter bar is the fixed categories, not these."
           },
           "loc": {
             "type": "string",
@@ -63,6 +63,17 @@
           "master": {
             "type": "string",
             "description": "Optional. What the download button pulls instead of file — normally the 32-bit float WAV, since FLAC is integer-only and cannot carry headroom above 0 dBFS."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "field",
+              "samples",
+              "strip",
+              "kit",
+              "waves"
+            ],
+            "description": "Which filter the core sits under: field (recordings), samples (processed clips), strip (SLUICE stems), kit (FATHOM kits), waves (LATHE wavetables). Optional: without it a core is field."
           }
         },
         "additionalProperties": false

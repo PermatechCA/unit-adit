@@ -805,11 +805,27 @@ addEventListener('orientationchange', () => setTimeout(resize, 250));
 if (window.visualViewport) visualViewport.addEventListener('resize', resize);
 
 /* ═══ HUD ════════════════════════════════════════════════════════════════ */
+/* The filter bar is fixed: what a sound is, not how it was tagged. FIELD recordings, SAMPLES
+   (processed clips: PS-1 loops, files you open), STRIP (SLUICE stems), KIT (FATHOM kits),
+   WAVES (LATHE wavetables). Tags stay on the row and in search. */
+const CATS = ['FIELD', 'SAMPLES', 'STRIP', 'KIT', 'WAVES'];
+const CAT_OF_TOOL = {field: 'FIELD', ps1: 'SAMPLES', sluice: 'STRIP', fathom: 'KIT', lathe: 'WAVES'};
+/* An archive core says which it is ("category"); an older manifest without it is read from its tags. */
+function catOfManifest(e){
+  const c = String(e.category || '').toUpperCase();
+  if (CATS.includes(c)) return c;
+  const t = (e.tags || []).map(x => String(x).toLowerCase());
+  if (t.includes('kit')) return 'KIT';
+  if (t.includes('wavetable') || t.includes('waves')) return 'WAVES';
+  if (t.includes('stem') || t.includes('strip')) return 'STRIP';
+  if (t.includes('sample') || t.includes('samples') || t.includes('loop')) return 'SAMPLES';
+  return 'FIELD';
+}
 function filtered(){
   const q = S.query;
   return S.entries.map((e,i) => ({e,i})).filter(({e}) =>
-    (S.seam === 'ALL' || (e.tags||[]).includes(S.seam)) &&
-    (!q || (e.title + ' ' + (e.tags||[]).join(' ') + ' ' + (e.notes||'') + ' ' + (e.id||''))
+    (S.seam === 'ALL' || e.cat === S.seam) &&
+    (!q || (e.title + ' ' + (e.tags||[]).join(' ') + ' ' + (e.cat||'') + ' ' + (e.notes||'') + ' ' + (e.id||''))
             .toLowerCase().includes(q)));
 }
 function neighbour(d){
@@ -844,12 +860,12 @@ const UI = {
   },
 
   filters(){
-    const all = new Set(S.entries.flatMap(e => e.tags || []));
-    // in the library the first split is whose it is: yours, or the archive's
-    const lead = LIB ? ['YOURS', 'ARCHIVE'].filter(t => all.has(t)) : [];
-    const seams = ['ALL', ...new Set([...lead, ...all])].slice(0, 5);
-    el.filter.innerHTML = seams.map(s =>
-      `<button type="button" data-seam="${esc(s)}" aria-pressed="${s===S.seam}">${esc(s)}</button>`).join('');
+    // all six, always, so the bar never shifts; a category with nothing in it yet is there but off
+    const n = {ALL: S.entries.length};
+    for (const e of S.entries) n[e.cat] = (n[e.cat] || 0) + 1;
+    el.filter.innerHTML = ['ALL', ...CATS].map(s =>
+      `<button type="button" data-seam="${s}" aria-pressed="${s===S.seam}"${n[s] || s === S.seam ? '' : ' disabled'}` +
+      ` title="${s} · ${n[s] || 0}">${s}</button>`).join('');
   },
 
   rows(){
@@ -1386,7 +1402,7 @@ async function addFiles(files){
   for (const f of keep){
     const e = {
       title: f.name.replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').toUpperCase(),
-      file: f, size: f.size, local: true,
+      file: f, size: f.size, local: true, cat: LIB ? 'SAMPLES' : 'FIELD',
       tags: [(f._path || '').split('/').filter(Boolean).pop() || 'LOCAL'].map(t => t.toUpperCase().slice(0,12))
     };
     if (LIB){                                   // in Workbench a file you open is kept, so every tool can reach it
@@ -1481,7 +1497,7 @@ const Library = (() => {
           title: up(m.title || ('FIELD ' + (local(at).slice(0, 16).replace('T', ' ') || id)), 80),
           handle: {dir: d, name: base(j.file)}, dlName: slug(m.title || id) + '.wav',
           size: j.bytes, dur: j.durationSec, made: at || 0,
-          tags: ['YOURS', 'FIELD'].concat(m.ucs && m.ucs.category ? [up(m.ucs.category)] : []),
+          cat: 'FIELD', tags: ['YOURS', 'FIELD'].concat(m.ucs && m.ucs.category ? [up(m.ucs.category)] : []),
           loc: where, date: day(at),
           notes: [m.place && m.place.name, m.notes].filter(Boolean).join(' · ') || undefined,
           license: 'Yours. Recorded with FIELD on this device.'
@@ -1511,7 +1527,7 @@ const Library = (() => {
             throw new Error('PS-1 loop is shorter than its meta says');
           },
           size: m.frames * 8 + 44, dur: m.frames / m.sampleRate, made,
-          tags: ['YOURS', 'PS-1', 'LOOP'], date: made ? day(made) : undefined,
+          cat: 'SAMPLES', tags: ['YOURS', 'PS-1', 'LOOP'], date: made ? day(made) : undefined,
           notes: [m.bars ? m.bars + ' bars' : '', m.bpm ? m.bpm + ' BPM' : ''].filter(Boolean).join(' · ') || undefined,
           license: 'Yours. Kept by PS-1 on this device.'
         });
@@ -1536,6 +1552,7 @@ const Library = (() => {
               id: 'SHELF-' + tool + '-' + id, local: true, source: {tool, id},
               title: up(j.title || j.file, 80), handle: {dir: d, name: base(j.file)}, dlName: base(j.file),
               size: j.bytes, dur: j.durationSec, made, date: made ? day(made) : undefined,
+              cat: CAT_OF_TOOL[tool] || 'SAMPLES',
               tags: ['YOURS', up(tool === OWN ? 'OPENED' : tool)].concat((Array.isArray(j.tags) ? j.tags : []).map(t => up(t))),
               notes: j.notes ? String(j.notes) : undefined,
               license: tool === OWN ? 'Opened from your files and kept here.' : 'Yours. Made with ' + up(tool) + ' on this device.'
@@ -1577,7 +1594,7 @@ const Library = (() => {
       const j = {v: 1, tool: OWN, id, title: f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '), file, bytes: f.size,
                  made: new Date(now).toISOString(), notes: 'Opened from ' + f.name};
       await write(d, id + '.json', JSON.stringify(j));               // written last: no sidecar, not listed
-      return {handle: {dir: d, name: file}, dlName: f.name, tags: ['YOURS', 'OPENED'], source: {tool: OWN, id},
+      return {handle: {dir: d, name: file}, dlName: f.name, tags: ['YOURS', 'OPENED'], cat: 'SAMPLES', source: {tool: OWN, id},
               made: now, date: day(now), notes: j.notes, license: 'Opened from your files and kept here.'};
     } catch(_){
       /* Where getFileHandle works but createWritable does not (Safari before 26) an empty file is left
@@ -1709,7 +1726,7 @@ async function loadManifest(){
       title: (e.title || e.file || 'UNTITLED').toUpperCase(),
       url: /^https?:/i.test(e.file) ? e.file : base + e.file,
       masterUrl: e.master ? (/^https?:/i.test(e.master) ? e.master : base + e.master) : null,
-      tags: (LIB ? ['ARCHIVE'] : []).concat((e.tags || []).map(t => t.toUpperCase())),
+      tags: (LIB ? ['ARCHIVE'] : []).concat((e.tags || []).map(t => t.toUpperCase())), cat: catOfManifest(e),
       loc: e.loc, date: e.date, notes: e.notes, license: e.license, id: e.id
     }));
     el.coll.textContent = S.collection;
