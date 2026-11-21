@@ -65,6 +65,9 @@ The filter bar is fixed: **ALL · FIELD · SAMPLES · STRIP · KIT · WAVES**. S
 and are searched, but no longer make buttons. Inside Workbench, your own work sorts itself: FIELD
 takes under FIELD, PS-1 loops and files you open under SAMPLES, SLUICE stems under STRIP, FATHOM
 kits under KIT, LATHE tables under WAVES. A category with nothing in it shows, dimmed.
+A tool that keeps more than one kind of sound can say which in its shelf sidecar:
+`"category": "field" | "samples" | "strip" | "kit" | "waves"`. Without it, the folder decides
+(`shelf/sluice/` STRIP, `shelf/fathom/` KIT, `shelf/lathe/` WAVES, any other tool SAMPLES).
 
 ### Where to put the audio
 

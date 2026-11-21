@@ -1239,6 +1239,12 @@ if (window.visualViewport) visualViewport.addEventListener('resize', resize);
    WAVES (LATHE wavetables). Tags stay on the row and in search. */
 const CATS = ['FIELD', 'SAMPLES', 'STRIP', 'KIT', 'WAVES'];
 const CAT_OF_TOOL = {field: 'FIELD', ps1: 'SAMPLES', sluice: 'STRIP', fathom: 'KIT', lathe: 'WAVES'};
+/* A shelf sidecar may say which it is ("category": "kit" and so on), for a tool that keeps more than one
+   kind of sound. Without it, or with a word ADIT doesn't know, the tool's folder decides. */
+function catOfShelf(j, tool){
+  const c = String(j.category || '').toUpperCase();
+  return CATS.includes(c) ? c : (CAT_OF_TOOL[tool] || 'SAMPLES');
+}
 /* An archive core says which it is ("category"); an older manifest without it is read from its tags. */
 function catOfManifest(e){
   const c = String(e.category || '').toUpperCase();
@@ -1981,7 +1987,7 @@ const Library = (() => {
               id: 'SHELF-' + tool + '-' + id, local: true, source: {tool, id},
               title: up(j.title || j.file, 80), handle: {dir: d, name: base(j.file)}, dlName: base(j.file),
               size: j.bytes, dur: j.durationSec, made, date: made ? day(made) : undefined,
-              cat: CAT_OF_TOOL[tool] || 'SAMPLES',
+              cat: catOfShelf(j, tool),
               tags: ['YOURS', up(tool === OWN ? 'OPENED' : tool)].concat((Array.isArray(j.tags) ? j.tags : []).map(t => up(t))),
               notes: j.notes ? String(j.notes) : undefined,
               license: tool === OWN ? 'Opened from your files and kept here.' : 'Yours. Made with ' + up(tool) + ' on this device.'
