@@ -1,6 +1,6 @@
 {
   "$schema": "./archive.schema.json",
-  "collection": "CACHE 01 — HALIFAX APPROACHES",
+  "collection": "CACHE 01 — NOVA SCOTIA",
   "base": "audio/",
   "entries": [
     {
@@ -10,6 +10,7 @@
       "master": "cache-01/ravens-talking-in-the-snow-32f.wav",
       "category": "field",
       "tags": ["field", "birds", "snow"],
+      "loc": "Nova Scotia",
       "license": "CC BY-NC 4.0 — commercial on request"
     },
     {
@@ -19,6 +20,7 @@
       "master": "cache-01/light-rain-32f.wav",
       "category": "field",
       "tags": ["field", "rain"],
+      "loc": "Nova Scotia",
       "license": "CC BY-NC 4.0 — commercial on request"
     },
     {
@@ -28,6 +30,7 @@
       "master": "cache-01/red-tail-hawk-32f.wav",
       "category": "field",
       "tags": ["field", "birds"],
+      "loc": "Nova Scotia",
       "license": "CC BY-NC 4.0 — commercial on request"
     },
     {
@@ -37,6 +40,7 @@
       "master": "cache-01/ocean-waves-gravel-and-plastic-wrappers-32f.wav",
       "category": "field",
       "tags": ["field", "water"],
+      "loc": "Nova Scotia",
       "license": "CC BY-NC 4.0 — commercial on request"
     },
     {
@@ -46,6 +50,7 @@
       "master": "cache-01/crickets-4am-32f.wav",
       "category": "field",
       "tags": ["field", "insects", "night"],
+      "loc": "Nova Scotia",
       "license": "CC BY-NC 4.0 — commercial on request"
     },
     {
@@ -55,6 +60,7 @@
       "master": "cache-01/plane-flying-over-32f.wav",
       "category": "field",
       "tags": ["field", "aircraft"],
+      "loc": "Nova Scotia",
       "license": "CC BY-NC 4.0 — commercial on request"
     }
   ]

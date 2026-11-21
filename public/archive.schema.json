@@ -48,7 +48,7 @@
           },
           "loc": {
             "type": "string",
-            "description": "Decimal lat lon, space separated."
+            "description": "Where it was recorded: decimal \"lat lon\" (space separated) or a place name. Shown on the stamp as SITE."
           },
           "date": {
             "type": "string",
