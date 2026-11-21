@@ -1,0 +1,14 @@
+// ADIT is a static site: wrangler uploads public/ and nothing else (build/, test/ and the docs stay home).
+// Without this file Workers Builds has nothing to go on: a branch build fails with "Missing entry-point
+// to Worker script or to assets directory", and a main build opens an auto-config pull request
+// instead of deploying.
+//
+// No "routes" key, on purpose: the custom domain is managed in the dashboard (DEPLOY.md §5, §7), and
+// Wrangler only takes over routes when this file lists them.
+{
+  "name": "unit-adit",
+  "compatibility_date": "2026-11-19",
+  "assets": {
+    "directory": "./public"
+  }
+}

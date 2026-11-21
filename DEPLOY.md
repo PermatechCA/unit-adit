@@ -184,18 +184,26 @@ Dashboard → **Workers & Pages → Create application → Connect to Git** → 
 select `unit-adit`.
 
 - **Production branch:** `main`
-- **Framework preset:** None
 - **Build command:** *(empty — static site)*
-- **Build output directory:** `public`
+- **Deploy command:** `npx wrangler deploy` (the default)
+- **Non-production branch deploy command:** `npx wrangler versions upload` (the default)
+- **Root directory:** *(empty)*
 
 Deploy. Live in under a minute.
+
+> ⚠️ **`wrangler.jsonc` at the repo root is what tells Cloudflare to upload `public/`.** Keep it.
+> Without it, a push to any branch other than `main` fails with *"Missing entry-point to Worker
+> script or to assets directory"*, and a `main` build may open an auto-config pull request
+> instead of deploying. It has no `routes` on purpose: the custom domain stays managed in the
+> dashboard. A branch push gives you a preview URL under **Deployments**: test there, then merge
+> to `main`.
 
 > ⚠️ You get a **Worker with static assets**, not a "Pages project" — Cloudflare merged
 > Pages into Workers. A `*.workers.dev` URL instead of `*.pages.dev` is correct and fine.
 > `_headers` and `_redirects` still work.
 
-> ⚠️ **Build output directory is the number one cause of blank deploys.** If the site
-> deploys but shows 404 or nothing, check this before anything else.
+> ⚠️ **The assets directory is the number one cause of blank deploys.** If the site
+> deploys but shows 404 or nothing, check `"directory": "./public"` in `wrangler.jsonc` first.
 
 > ⚠️ With a build step (React/Vite/Astro), set the build command (`npm run build`) and point
 > the output at `dist` / `build` / `.output/public`. Plain HTML: leave the command empty.
