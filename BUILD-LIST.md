@@ -9,9 +9,9 @@ when it ships.
 player can play straight off the card. Next time, it copies only what's new. It can also back the whole
 library up as one zip.
 
-**Target player: FiiO (Snowsky) Echo Mini.** Per FiiO's spec page: WAV and FLAC up to 24-bit/192 kHz,
-microSD up to 256 GB, FAT32 or exFAT (no NTFS). 32-bit float isn't listed, so the card gets a player copy,
-and the library and backups stay float.
+**Target player: FiiO Snowsky ECHO** (the full-size one, not the Mini). Its listed spec: WAV and FLAC up
+to 24-bit/192 kHz, microSD up to 256 GB. 32-bit float isn't listed, so the card gets a player copy, and the
+library and backups stay float. Format sync with FAT32 or exFAT (FiiO lists no NTFS for the Snowsky line).
 
 ### On the card
 
@@ -27,7 +27,7 @@ ADIT/
 ```
 
 - Folders follow the library categories. Kits are folders, with the slot number leading each file name.
-- **Format: FLAC 24-bit by default**, with title, album (= category or kit) and artist tags, so the Echo
+- **Format: FLAC 24-bit by default**, with title, album (= category or kit) and artist tags, so the ECHO
   shows real names instead of file names. WAV 24-bit is an option.
 - **Over 0 dBFS:** a float sound that peaks above full scale would clip at 24-bit. Its player copy is
   turned down just enough to fit, never clipped, and the index records by how much.
