@@ -107,10 +107,26 @@ A file with more than two channels gets a **Listen as** row in the deck. Every c
 can solo or drop any of them; what you leave on is summed to both ears. A four-channel file can also be
 heard as first-order **AmbiX** (ACN/SN3D, the default when the name says ambix, FOA, B-format, H3-VR or
 NT-SF1) or **FuMa**: it is decoded to eight virtual speakers through the browser's HRTF, so on headphones
-each sound keeps its place. A compass appears beside the meters: you are at its centre, your front at
-the top, and the dots show where the energy came from in the last moments of the core. Drag it to turn
-your head (double-click to face front). This is how you listen, nothing more: the download, the hand-off
-and the core itself are always the recorded channels.
+each sound keeps its place.
+
+B-format opens in the **SPACE** view: a wire ball you stand in, the recording's front marked in amber
+on the equator. Every moment of the take puts three motes on it (low in rust, mid in amber, high in
+bone) where that band's energy came from, so the whole recording hangs there as a faint constellation;
+the moment under the read head flares and trails a comet of the last few seconds. The teal glyph is the
+**receiver**, you. Drag it toward a sound and the field leans that way (Gerzon's dominance, up to
++12 dB toward, as much down behind) and you turn to face it; drag around it to orbit; double-click to
+go back to the centre.
+
+What you hear is what goes on: **Send to** and **Keep what you hear** render the receiver's position
+as a 32-bit float stereo WAV (the A/B region only, if one is marked). The ↓ download is always the
+recorded B-format, untouched.
+
+## Keeping a cut
+
+Mark A/B on the ruler (press and hold, then drag), and **Keep A/B** puts exactly that region in the
+library as a new sound, float, with a note of where it came from. Archive cores cut from their float
+master. The original is never touched. **LEVEL** in the deck is listening level only: it changes
+nothing that is kept, sent or downloaded.
 
 ## Reading local files
 
@@ -140,7 +156,8 @@ picker, so use **Open files** and multi-select from Files.
 | / | jump to search |
 | K | copy a link to this moment |
 | I / O / X | mark A, mark B, clear |
-| V (or the view key) | READ → DIVE → RACK |
+| V (or the view key) | READ → DIVE → RACK, with SPACE first for B-format |
+| SPACE: drag the receiver | move where you listen from; drag around it to orbit, double-click to recentre |
 | drag the core | seek by depth |
 | drag beside the core | turn it |
 | DIVE: drag up / down | travel through the core; sideways turns it |

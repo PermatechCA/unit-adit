@@ -175,10 +175,19 @@ html[data-workbench="app"] #strip{margin-left:max(0px, calc(var(--wb-mark-inset,
 .act.armed{color:var(--alarm);border-color:var(--alarm)}
 #rn{flex:1 1 180px;min-width:0;min-height:44px;font:inherit;font-size:16px;letter-spacing:.04em;text-transform:none;
   background:var(--ink);color:var(--bone);border:1px solid var(--amber);padding:0 calc(var(--u)*3);border-radius:0}
-#space{position:fixed;z-index:4;width:148px;height:148px;touch-action:none;cursor:grab}
-#space[hidden]{display:none}
-/* inside the core the title would sit on the tunnel, so it steps back */
-body[data-view="dive"] #stamp,body[data-view="rack"] #stamp{opacity:.28}
+/* one tools row: THIS SOUND, LISTEN AS and SEND TO sit side by side and wrap only when they must */
+#tools{display:flex;flex-wrap:wrap;align-items:center;gap:calc(var(--u)*2) calc(var(--u)*7);padding:0 var(--pad) var(--pad)}
+#tools:not(:has(> :not([hidden]))){display:none}
+#tools .drow,#tools #sendrow{padding:0;gap:calc(var(--u)*1.5);flex-wrap:nowrap}
+#tools .act,#tools #sendrow .snd{min-height:34px;padding:0 calc(var(--u)*3)}
+#tools .act.ch{min-width:34px}
+@media (pointer:coarse){#tools .act,#tools #sendrow .snd{min-height:44px}#tools .act.ch{min-width:44px}}
+/* the title steps back when it would sit on the tunnel, the rack or the ball */
+body[data-view="dive"] #stamp,body[data-view="rack"] #stamp,body[data-view="space"] #stamp{opacity:.28}
+/* in the corner of a narrow stage the title keeps only its name */
+#stamp[data-fit="tight"] .m,#stamp[data-fit="tight"] .r{display:none}
+#stamp[data-fit="tight"] .v{font-size:14px;margin-top:2px}
+#stamp[data-fit="tight"] .k{font-size:8px}
 #sendkeys{display:flex;gap:calc(var(--u)*2);flex-wrap:wrap}
 #sendrow .snd{min-height:44px;padding:0 calc(var(--u)*4);background:transparent;color:var(--amber);border:1px solid var(--oxide);
   font:inherit;letter-spacing:.16em;cursor:pointer}
@@ -250,23 +259,7 @@ body[data-view="dive"] #stamp,body[data-view="rack"] #stamp{opacity:.28}
   border:1px dashed var(--amber);font-size:var(--tick);letter-spacing:.3em;color:var(--amber);text-transform:uppercase}
 #drop.on{display:grid}
 
-/* ─── TABLET ────────────────────────────────────────────────────────────── */
-@media (max-width:1000px) and (min-width:701px){
-  #hud{grid-template-columns:1fr 64px;grid-template-areas:"strip strip" "index meter" "deck deck";
-    gap:calc(var(--u)*2);padding:calc(var(--u)*2)}
-  #index{max-height:44vh}
-  #strip .cell.hide-s{display:none}
-  #deckrow{flex-wrap:wrap;gap:calc(var(--u)*2)}
-  #ruler{order:3;flex-basis:100%}
-  #stamp.side{left:auto;right:calc(var(--u)*4);text-align:right;max-width:44vw}
-  #stamp.side .r{margin-left:auto;margin-right:0}
-}
-
-/* ─── PHONE ─────────────────────────────────────────────────────────────────
-   One panel at a time. 48px minimum on anything a thumb lands on. 16px on the
-   search field, because below that iOS zooms the whole viewport on focus and
-   the layout never comes back.                                             */
-@media (max-width:700px){
+@media (max-width:1000px){
   :root{--tick:10px;--data:13px}
   #hud{grid-template-columns:1fr;grid-template-rows:auto auto minmax(0,1fr) auto;
     grid-template-areas:"strip" "tabs" "panel" "deck";
@@ -320,6 +313,10 @@ body[data-view="dive"] #stamp,body[data-view="rack"] #stamp{opacity:.28}
   #trimbox{grid-area:trimlab;white-space:nowrap}
   #gain{grid-area:trim;width:100%;height:32px}
   #label{display:none}
+  /* the tools row scrolls sideways rather than stacking up and squeezing the stage */
+  #tools{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  #tools::-webkit-scrollbar{display:none}
+  #tools .drow,#tools #sendrow{flex:none}
   #boot{top:calc(env(safe-area-inset-top) + 108px);bottom:auto;left:calc(var(--u)*3);
     right:calc(var(--u)*3);max-width:none;z-index:8}
 }
@@ -396,12 +393,14 @@ body[data-view="dive"] #stamp,body[data-view="rack"] #stamp{opacity:.28}
         <div id="head"></div>
       </div>
 
-      <div class="clock" id="trimbox"><s>TRIM</s> <b id="c-gain">0.0</b><s>dB</s></div>
+      <div class="clock" id="trimbox"><s>LEVEL</s> <b id="c-gain">0.0</b><s>dB</s></div>
       <input id="gain" type="range" min="-24" max="6" step="0.5" value="0" aria-label="Output trim in decibels">
     </div>
-    <div id="actrow" class="drow" hidden></div>
-    <div id="monrow" class="drow" hidden></div>
-    <div id="sendrow" hidden><span>Send to</span><span id="sendkeys"></span><span id="sendnote">· the A/B region if one is marked</span></div>
+    <div id="tools">
+      <div id="actrow" class="drow" hidden></div>
+      <div id="monrow" class="drow" hidden></div>
+      <div id="sendrow" hidden><span>Send to</span><span id="sendkeys"></span></div>
+    </div>
   </section>
 
 </div>
@@ -414,7 +413,7 @@ body[data-view="dive"] #stamp,body[data-view="rack"] #stamp{opacity:.28}
 </div>
 
 <div id="label"></div>
-<canvas id="space" hidden width="148" height="148" aria-label="Listening direction — drag to turn your head, double-click to face front"></canvas>
+
 <div id="drop">Release to log core</div>
 <div id="boot"><b>BOOT</b> <span id="boot-msg">starting…</span><span class="err" id="boot-err"></span></div>
 

@@ -69,8 +69,10 @@ FATHOM depth · ADIT through.)
     booting inside Workbench; the reference build once died on a FIELD location with no `lon`.
 13. **Library text reaches the page as text.** File names, FIELD notes and other tools' tags go through
     `esc()` before any `innerHTML`. That origin holds every Workbench tool's files.
-14. **The monitor is a way of listening, never a transform.** Mix, AmbiX and FuMa change what reaches
-    the ears only. Download, hand-off and the core are always the recorded channels. Web Audio's own
+14. **The monitor is a way of listening; a render says so.** Mix, AmbiX, FuMa and the receiver change
+    what reaches the ears. Download and the core are always the recorded channels. For B-format, Send to
+    and Keep what you hear are a render of the receiver (same `ambiRows()` matrix as the live monitor,
+    so what goes on is what was heard), kept as a new sound tagged HEARD; never written over the source. Web Audio's own
     down-mix drops channels past stereo, so a file of more than two channels always goes through the
     monitor's splitter, never straight to the trim.
 
@@ -100,7 +102,7 @@ Counts are for `public/index.html`.
 | `decodeAudioData` | **2** — comment + the FLAC/lossy branch only |
 | `logCore(` | **2** — definition and the call in `selectEntry` |
 | `copyToChannel` | **1** — the only route from parsed samples into an AudioBuffer |
-| `SLICES` | **23** |
+| `SLICES` | **29** |
 | `createPanner` | **2** — the feature check and the one call: the ambisonic monitor's eight virtual speakers. Nothing else is spatialised |
 | `ShaderMaterial` | **3** — bright, blur, composite. Nothing else may be one. |
 | `SpotLight` | **0** — see doctrine 2 |

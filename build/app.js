@@ -183,10 +183,13 @@ function logCore(chans, rate, onProgress){
   let bandMax = 1e-9;
 
   let truePeak = 0;
-  /* Four channels might be first-order ambisonics. Keep W·X, W·Y, W·Z and W² per slice: the active
-     intensity vector, which points at where the energy came from. Which channel is X depends on the
-     format (AmbiX or FuMa), so that is resolved when it is drawn, not here. */
-  const iv = nch === 4 ? new Float32Array(SLICES*4) : null;
+  /* Four channels might be first-order ambisonics. Per slice and per band (low < 300 Hz, mid, high
+     > 3 kHz) keep Re(W·conj(C)) for the three other channels and |W|²: the active intensity vector,
+     which points at where that band's energy came from (Pulkki's DirAC). Which channel is X depends on
+     the format, AmbiX or FuMa, so that is resolved when it is drawn, not here. */
+  const ivb = nch === 4 ? new Float32Array(SLICES*12) : null;
+  const fr = ivb ? [0,1,2,3].map(() => new Float32Array(WIN)) : null;
+  const fi = ivb ? [0,1,2,3].map(() => new Float32Array(WIN)) : null;
   for (let s = 0; s < SLICES; s++){
     const start = s * hop, end = Math.min(n, start + hop);
     let sum = 0, peak = 0, cnt = 0;
@@ -198,12 +201,6 @@ function logCore(chans, rate, onProgress){
     }
     rms[s] = cnt ? Math.sqrt(sum/cnt) : 0;
     pk[s] = peak;
-    if (iv){
-      let a1 = 0, a2 = 0, a3 = 0, e0 = 0;
-      const c0 = chans[0], c1 = chans[1], c2 = chans[2], c3 = chans[3];
-      for (let i = start; i < end; i++){ const w = c0[i]; e0 += w*w; a1 += w*c1[i]; a2 += w*c2[i]; a3 += w*c3[i]; }
-      const o = s*4; iv[o] = a1; iv[o+1] = a2; iv[o+2] = a3; iv[o+3] = e0;
-    }
     if (peak > truePeak) truePeak = peak;
 
     re.fill(0); im.fill(0);
@@ -213,6 +210,22 @@ function logCore(chans, rate, onProgress){
       re[i] = (m / nch) * win[i];
     }
     fft(re, im);
+    if (ivb){
+      for (let c = 0; c < 4; c++){
+        const R = fr[c], I = fi[c], ch = chans[c]; I.fill(0);
+        for (let i = 0; i < WIN; i++) R[i] = (wStart + i < n ? ch[wStart+i] : 0) * win[i];
+        fft(R, I);
+      }
+      const o = s*12;
+      for (let k = 1; k < WIN/2; k++){
+        const fq = k*rate/WIN, j = o + (fq < 300 ? 0 : fq < 3000 ? 4 : 8);
+        const wr = fr[0][k], wi = fi[0][k];
+        ivb[j]   += wr*fr[1][k] + wi*fi[1][k];
+        ivb[j+1] += wr*fr[2][k] + wi*fi[2][k];
+        ivb[j+2] += wr*fr[3][k] + wi*fi[3][k];
+        ivb[j+3] += wr*wr + wi*wi;
+      }
+    }
     let num = 0, den = 0;
     for (let k = 1; k < WIN/2; k++){
       const mag = Math.hypot(re[k], im[k]);
@@ -267,7 +280,7 @@ function logCore(chans, rate, onProgress){
   const rmsN = new Float32Array(SLICES);
   for (let s = 0; s < SLICES; s++) rmsN[s] = Math.pow(rms[s]/rmsMax, 0.55);
 
-  return {rms, rmsN, cen, pk, bed, bands, bandHz, eMin, eMax, truePeak, iv, dur: n/rate};
+  return {rms, rmsN, cen, pk, bed, bands, bandHz, eMin, eMax, truePeak, ivb, dur: n/rate};
 }
 
 /* mineral ramp: spectral centroid → what the band is made of.
@@ -407,10 +420,52 @@ function setTrim(db){
 
    B-format is decoded to eight virtual speakers on a cube, max-rE weighted,
    each through the browser's own HRTF panner, so on headphones a sound keeps
-   its place as you turn. Turning rotates the decode, not the file. This is a
-   way of listening only: download, hand-off and the core itself stay the
-   recorded channels, untouched.                                             */
-const MON = {ctx:null, n:0, mode:'mix', on:[], yaw:0, pitch:0, mix:[], dec:[], nodes:[]};
+   its place as you turn. Turning rotates the decode, not the file.
+
+   The RECEIVER is where you stand in the field. Moving it off centre applies
+   Gerzon's dominance (a Lorentz-style boost of W against the velocity
+   components, Gerzon & Barton 1992): sounds the way you moved come up to
+   +12 dB and those behind drop as far, which is what first order can honestly
+   say about walking toward something. You also turn to face where you moved.
+   Live listening and the rendered WAV use the same matrix, so what you send
+   on is what you heard. Download and the core itself stay the recorded
+   channels.                                                                 */
+const MON = {ctx:null, n:0, mode:'mix', on:[], yaw:0, pitch:0, pos:[0,0,0], mix:[], dec:[], nodes:[]};
+const DOM_DB = 12, POS_MAX = 0.85;
+const ambiOn = () => MON.n === 4 && MON.mode !== 'mix' && MON.dec.length > 0;
+
+/* 8 × 4 decode gains in the file's own channel order: dominance toward the receiver, then max-rE
+   sampling of the field in the direction each speaker faces once the head has turned. */
+function ambiRows(mode, pos, yaw, pitch){
+  const fuma = mode === 'fuma';
+  const r = Math.hypot(pos[0], pos[1], pos[2]);
+  const lam = Math.pow(10, clamp(r / POS_MAX, 0, 1) * DOM_DB / 20);
+  const a = (lam + 1/lam)/2, b = (lam - 1/lam)/2;
+  const v = r > 1e-6 ? [pos[0]/r, pos[1]/r, pos[2]/r] : [1, 0, 0];
+  const T = [[a, b*v[0], b*v[1], b*v[2]]];                       // canonical W X Y Z, SN3D
+  for (let i = 0; i < 3; i++){ const row = [b*v[i]]; for (let j = 0; j < 3; j++) row.push((i === j ? 1 : 0) + (a - 1)*v[i]*v[j]); T.push(row); }
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), spp = Math.sin(pitch);
+  const K = Math.sqrt(8)/8, G1 = 3 * 0.577;                     // 1/N basic decode, energy make-up, max-rE
+  return SPK.map(([x, y, z]) => {
+    const x1 = x*cp - z*spp, z1 = x*spp + z*cp;                  // the speaker in front of your face samples
+    const w = [x1*cy - y*sy, x1*sy + y*cy, z1];                  // where you are looking: pitch, then yaw
+    const q = [K, K*G1*w[0], K*G1*w[1], K*G1*w[2]];
+    const rc = [0,1,2,3].map(j => q[0]*T[0][j] + q[1]*T[1][j] + q[2]*T[2][j] + q[3]*T[3][j]);
+    return fuma ? [rc[0]*Math.SQRT2, rc[1], rc[2], rc[3]]     // W X Y Z, W 3 dB down
+                : [rc[0], rc[2], rc[3], rc[1]];                // W Y Z X
+  });
+}
+/* one virtual speaker: a sum node into an HRTF panner placed on the cube */
+function speaker(ctx, u, out){
+  const sum = ctx.createGain(), pn = ctx.createPanner();
+  pn.panningModel = 'HRTF'; pn.distanceModel = 'linear'; pn.rolloffFactor = 0;
+  // ambisonic axes are X front, Y left, Z up; Web Audio's listener faces −Z with +X to the right
+  const px = -u[1], py = u[2], pz = -u[0];
+  if (pn.positionX){ pn.positionX.value = px; pn.positionY.value = py; pn.positionZ.value = pz; }
+  else pn.setPosition(px, py, pz);
+  sum.connect(pn); pn.connect(out);
+  return [sum, pn];
+}
 const AMBI_RE = /ambix|ambisonic|\bfoa\b|b-?format|h3-?vr|nt-?sf1/i;
 const SPK = [];
 for (const x of [1,-1]) for (const y of [1,-1]) for (const z of [1,-1]) SPK.push([x/Math.sqrt(3), y/Math.sqrt(3), z/Math.sqrt(3)]);
@@ -429,13 +484,7 @@ function buildMonitor(n){
   mg.connect(A.gain);
   if (n === 4 && ctx.createPanner){
     for (const u of SPK){
-      const sum = ctx.createGain(), pn = ctx.createPanner();
-      pn.panningModel = 'HRTF'; pn.distanceModel = 'linear'; pn.rolloffFactor = 0;
-      // ambisonic axes are X front, Y left, Z up; Web Audio's listener faces −Z with +X to the right
-      const px = -u[1], py = u[2], pz = -u[0];
-      if (pn.positionX){ pn.positionX.value = px; pn.positionY.value = py; pn.positionZ.value = pz; }
-      else pn.setPosition(px, py, pz);
-      sum.connect(pn); pn.connect(A.gain);
+      const [sum, pn] = speaker(ctx, u, A.gain);
       const row = [];
       for (let c = 0; c < 4; c++){ const g = ctx.createGain(); g.gain.value = 0; sp.connect(g, c); g.connect(sum); row.push(g); MON.nodes.push(g); }
       MON.dec.push(row); MON.nodes.push(sum, pn);
@@ -451,18 +500,50 @@ function setMonitor(){
   const lit = MON.on.filter(Boolean).length || 1;
   MON.mix.forEach((g, c) => g.gain.setTargetAtTime(!amb && MON.on[c] ? 1/Math.sqrt(lit) : 0, t, 0.015));
   if (!MON.dec.length) return;
-  const fuma = MON.mode === 'fuma';
-  const cy = Math.cos(MON.yaw), sy = Math.sin(MON.yaw), cp = Math.cos(MON.pitch), spp = Math.sin(MON.pitch);
-  const K = amb ? Math.sqrt(8)/8 : 0, G1 = 3 * 0.577;          // 1/N basic decode, energy make-up, max-rE
-  MON.dec.forEach((row, s) => {
-    const [x, y, z] = SPK[s];
-    // the speaker in front of your face samples the field where you are looking: pitch, then yaw
-    const x1 = x*cp - z*spp, z1 = x*spp + z*cp;
-    const fx = x1*cy - y*sy, fy = x1*sy + y*cy, fz = z1;
-    const w = fuma ? [K*Math.SQRT2, K*G1*fx, K*G1*fy, K*G1*fz]     // W X Y Z, W 3 dB down
-                   : [K, K*G1*fy, K*G1*fz, K*G1*fx];               // W Y Z X
-    row.forEach((g, c) => g.gain.setTargetAtTime(w[c], t, 0.02));
-  });
+  const rows = ambiRows(MON.mode, MON.pos, MON.yaw, MON.pitch);
+  MON.dec.forEach((row, s) => row.forEach((g, c) => g.gain.setTargetAtTime(amb ? rows[s][c] : 0, t, 0.02)));
+}
+
+/* What you hear at the receiver, as a stereo float render. Same matrix as the live monitor. Offline in
+   20 s pieces, each warmed with the samples before it so the HRTF filters carry over, which keeps a
+   long four-channel take from needing two more copies of itself in memory at once. */
+async function renderHeard(e, region){
+  const d = e.decoded;
+  if (!d || d.chans.length !== 4) throw new Error('not a four-channel core');
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!OAC) throw new Error('this browser cannot render offline');
+  const rate = d.rate, n = d.chans[0].length;
+  const a0 = region ? Math.max(0, Math.floor(region[0]*rate)) : 0;
+  const a1 = region ? Math.min(n, Math.ceil(region[1]*rate)) : n;
+  const len = a1 - a0;
+  if (len <= 0) throw new Error('nothing to render');
+  const rows = ambiRows(MON.mode, MON.pos, MON.yaw, MON.pitch);
+  const L = new Float32Array(len), R = new Float32Array(len), CH = rate*20;
+  for (let at = 0; at < len; at += CH){
+    const pre = Math.min(4096, a0 + at), m = Math.min(CH, len - at) + pre, from = a0 + at - pre;
+    const oc = new OAC(2, m, rate);
+    const buf = oc.createBuffer(4, m, rate);
+    for (let c = 0; c < 4; c++) buf.getChannelData(c).set(d.chans[c].subarray(from, from + m));
+    const src = oc.createBufferSource(); src.buffer = buf;
+    const sp = oc.createChannelSplitter(4); src.connect(sp);
+    rows.forEach((row, k) => {
+      const [sum] = speaker(oc, SPK[k], oc.destination);
+      row.forEach((g, c) => { const gn = oc.createGain(); gn.gain.value = g; sp.connect(gn, c); gn.connect(sum); });
+    });
+    src.start();
+    const out = await oc.startRendering();
+    L.set(out.getChannelData(0).subarray(pre), at); R.set(out.getChannelData(1).subarray(pre), at);
+    el.hint.textContent = 'Rendering what you hear · ' + Math.round(Math.min(1, (at + CH)/len)*100) + '%';
+  }
+  return {chans: [L, R], rate};
+}
+/* where the receiver is, in words */
+function heardLabel(){
+  const r = Math.hypot(...MON.pos) / POS_MAX;
+  if (r < 0.08) return 'at the centre';
+  const deg = Math.round(Math.abs(MON.yaw) * 180/Math.PI), el_ = Math.round(MON.pitch * 180/Math.PI);
+  const dir = deg < 3 ? 'ahead' : deg > 177 ? 'behind' : deg + '° ' + (MON.yaw > 0 ? 'left' : 'right');
+  return dir + (Math.abs(el_) >= 8 ? ', ' + Math.abs(el_) + '° ' + (el_ > 0 ? 'up' : 'down') : '') + ' · +' + (r*DOM_DB).toFixed(1) + ' dB';
 }
 
 /* peak per channel, read post-trim so the meter shows what leaves the deck */
@@ -597,7 +678,7 @@ const VIEWS = {
 const VIEW_ORDER = ['read', 'dive', 'rack'];
 
 const TOUCH = matchMedia('(pointer:coarse)').matches;
-const PHONE = matchMedia('(max-width:700px)').matches;
+const PHONE = matchMedia('(max-width:1000px)').matches;   // the tabbed layout, phones and tablets
 const PARALLAX = TOUCH ? 0 : 1;      // no cursor to follow, so no drift
 if (PHONE){ camera.fov = 42; camera.updateProjectionMatrix(); }
 if (TOUCH) renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
@@ -779,6 +860,138 @@ function tintRack(i, col){
   ca.needsUpdate = true;
 }
 
+/* ─ SPACE: the ambisonic field as a ball you stand in ─────────────────────────
+   Hairline parallels and meridians; the recording's front is the amber tick on
+   the equator. Every slice puts three points on it (low in rust nearest you,
+   mid in amber, high in bone outermost) where that band's energy came from;
+   diffuse energy sits further in, because it came from all round you. The
+   whole take is a faint constellation; the moment under the read head flares
+   and trails a comet of the last few seconds. The teal glyph is you: drag it
+   and the field leans toward where you went.                               */
+const RB = 2.3;
+const ball = new THREE.Group(); ball.position.x = COL_X; ball.visible = false; scene.add(ball);
+const A2T = (x, y, z, o) => o.set(-y, z, -x);                  // ambisonic X front, Y left, Z up → scene
+const T2A = v => [-v.z, -v.x, v.y];
+{
+  const v = [], ring = (el, segs) => {
+    for (let i = 0; i < segs; i++){
+      const a0 = i/segs*TAU, a1 = (i+1)/segs*TAU, ce = Math.cos(el)*RB, y = Math.sin(el)*RB;
+      v.push(Math.cos(a0)*ce, y, Math.sin(a0)*ce, Math.cos(a1)*ce, y, Math.sin(a1)*ce);
+    }
+  };
+  for (const deg of [-60, -30, 30, 60]) ring(deg*Math.PI/180, 72);
+  for (let m = 0; m < 12; m++){
+    const az = m/12*TAU;
+    for (let i = 0; i < 36; i++){
+      const e0 = -Math.PI/2 + i/36*Math.PI, e1 = -Math.PI/2 + (i+1)/36*Math.PI;
+      v.push(Math.cos(az)*Math.cos(e0)*RB, Math.sin(e0)*RB, Math.sin(az)*Math.cos(e0)*RB,
+             Math.cos(az)*Math.cos(e1)*RB, Math.sin(e1)*RB, Math.sin(az)*Math.cos(e1)*RB);
+    }
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+  ball.add(new THREE.LineSegments(g, trace({color:0xCFC8BC, opacity:0.075})));
+  const eq = new THREE.Line(ringGeo(RB, 144), trace({color:0xCFC8BC, opacity:0.24})); ball.add(eq);
+  // the recording's front: a short amber tick on the equator, pointing in
+  const f = new THREE.Vector3(); A2T(1, 0, 0, f);
+  const fg = new THREE.BufferGeometry().setFromPoints([f.clone().multiplyScalar(1.10), f.clone().multiplyScalar(0.94)]);
+  ball.add(new THREE.Line(fg, trace({color:0xE7B24C, opacity:0.95, fog:false})));
+}
+/* a soft round mote: points are square in WebGL unless they are given a shape */
+const MOTE = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.28, 'rgba(255,255,255,.75)');
+  r.addColorStop(0.6, 'rgba(255,255,255,.18)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = r; g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+let fieldPts = null, fieldE = null, fieldF = null;
+const BAND_COL = [P_RUST, P_AMBER, P_BONE];
+function buildField(log, mode){
+  if (fieldPts){ ball.remove(fieldPts); fieldPts.geometry.dispose(); fieldPts = null; }
+  if (!log || !log.ivb) return;
+  const fuma = mode === 'fuma', N = SLICES*3, iv = log.ivb;
+  const pos = new Float32Array(N*3), col = new Float32Array(N*3);
+  fieldE = new Float32Array(N); fieldF = new Float32Array(N);
+  const emax = [1e-12, 1e-12, 1e-12];
+  for (let s2 = 0; s2 < SLICES; s2++) for (let b = 0; b < 3; b++) emax[b] = Math.max(emax[b], iv[s2*12 + b*4 + 3]);
+  const p = new THREE.Vector3();
+  for (let s2 = 0; s2 < SLICES; s2++) for (let b = 0; b < 3; b++){
+    const o = s2*12 + b*4, E = iv[o+3], k = s2*3 + b;
+    const X = fuma ? iv[o] : iv[o+2], Y = fuma ? iv[o+1] : iv[o], Z = fuma ? iv[o+2] : iv[o+1];
+    const m = Math.hypot(X, Y, Z);
+    const focus = E > 0 ? clamp(m / E * (fuma ? Math.SQRT1_2 : 1), 0, 1) : 0;
+    fieldE[k] = Math.sqrt(E / emax[b]); fieldF[k] = focus;
+    const r = RB * (0.80 + 0.09*b) * (0.62 + 0.38*focus);
+    if (m > 0) A2T(X/m*r, Y/m*r, Z/m*r, p); else p.set(0, 0, 0);
+    pos[k*3] = p.x; pos[k*3+1] = p.y; pos[k*3+2] = p.z;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  fieldPts = new THREE.Points(g, new THREE.PointsMaterial({size:0.11, map:MOTE, vertexColors:true, transparent:true,
+    blending:THREE.AdditiveBlending, depthWrite:false, sizeAttenuation:true, fog:false}));
+  ball.add(fieldPts);
+}
+// the moment under the read head: three flares, and a ray from each to you
+const nowGeo = new THREE.BufferGeometry();
+nowGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
+nowGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9), 3));
+const nowPts = new THREE.Points(nowGeo, new THREE.PointsMaterial({size:0.42, map:MOTE, vertexColors:true, transparent:true,
+  blending:THREE.AdditiveBlending, depthWrite:false, sizeAttenuation:true, fog:false}));
+const rayGeo = new THREE.BufferGeometry();
+rayGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(18), 3));
+rayGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(18), 3));
+const rays = new THREE.LineSegments(rayGeo, trace({vertexColors:true, opacity:1, fog:false}));
+ball.add(nowPts, rays);
+// you: a ring, a nose, a point. The pick sphere is generous so a thumb finds it.
+const rcv = new THREE.Group();
+rcv.add(new THREE.Line(ringGeo(0.16, 48), trace({color:0x9FF0D6, opacity:0.95, fog:false})));
+const noseGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -0.5)]);
+const nose = new THREE.Line(noseGeo, trace({color:0x9FF0D6, opacity:0.95, fog:false}));
+rcv.add(nose);
+const rcvDot = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3()]),
+  new THREE.PointsMaterial({color:0x9FF0D6, size:0.3, map:MOTE, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, fog:false}));
+rcv.add(rcvDot);
+const rcvPick = new THREE.Mesh(new THREE.SphereGeometry(TOUCH ? 0.55 : 0.38, 12, 8), new THREE.MeshBasicMaterial({visible:false}));
+rcv.add(rcvPick);
+ball.add(rcv);
+const ORB = {az: 0.55, el: 0.32};
+const _p = new THREE.Vector3(), _q2 = new THREE.Vector3();
+function updateField(f, dur){
+  A2T(MON.pos[0]*RB, MON.pos[1]*RB, MON.pos[2]*RB, rcv.position);
+  // nose: the way you face
+  const cp = Math.cos(MON.pitch);
+  A2T(Math.cos(MON.yaw)*cp, Math.sin(MON.yaw)*cp, Math.sin(MON.pitch), _p);
+  noseGeo.attributes.position.setXYZ(1, _p.x*0.5, _p.y*0.5, _p.z*0.5); noseGeo.attributes.position.needsUpdate = true;
+  if (!fieldPts) return;
+  const col = fieldPts.geometry.attributes.color, pos = fieldPts.geometry.attributes.position;
+  const sl = f * SLICES, per = (dur || 1) / SLICES, TRAIL = 3.5;
+  for (let s2 = 0; s2 < SLICES; s2++){
+    const age = (sl - s2) * per;
+    const flare = age >= 0 && age < TRAIL ? Math.pow(1 - age/TRAIL, 2) : 0;
+    for (let b = 0; b < 3; b++){
+      const k = s2*3 + b, e = fieldE[k], fo = fieldF[k], c = BAND_COL[b];
+      const v = (0.045 + 0.16*e*fo) + flare*(0.35 + 1.4*e)*(0.35 + 0.65*fo);
+      col.setXYZ(k, c.r*v, c.g*v, c.b*v);
+    }
+  }
+  col.needsUpdate = true;
+  const s0 = Math.min(SLICES-1, Math.max(0, Math.floor(sl)));
+  const np = nowGeo.attributes.position, nc = nowGeo.attributes.color, rp = rayGeo.attributes.position, rc = rayGeo.attributes.color;
+  for (let b = 0; b < 3; b++){
+    const k = s0*3 + b, e = fieldE[k], fo = fieldF[k], c = BAND_COL[b];
+    _p.fromBufferAttribute(pos, k);
+    np.setXYZ(b, _p.x, _p.y, _p.z);
+    const v = A.playing || A.offset > 0 ? (0.25 + 1.3*e) * (0.4 + 0.6*fo) : 0;
+    nc.setXYZ(b, c.r*v, c.g*v, c.b*v);
+    rp.setXYZ(b*2, rcv.position.x, rcv.position.y, rcv.position.z); rp.setXYZ(b*2+1, _p.x, _p.y, _p.z);
+    const w = v * 0.45;
+    rc.setXYZ(b*2, 0.62*w, 0.94*w, 0.84*w); rc.setXYZ(b*2+1, c.r*w, c.g*w, c.b*w);
+  }
+  np.needsUpdate = nc.needsUpdate = rp.needsUpdate = rc.needsUpdate = true;
+}
+
 /* ─ suspended dust. the only thing in here that is matter ─ */
 const DUST = TOUCH ? 340 : 700;
 const dpos = new Float32Array(DUST*3), dseed = new Float32Array(DUST);
@@ -867,25 +1080,63 @@ function pass(mat, target){
 const CORE_SPAN = COL_H + 0.7;
 const READ_DIR = new THREE.Vector3(PHONE ? 0.22 : 0.30, PHONE ? 0.10 : 0.13, 1).normalize();
 
-function frameRead(){
-  const H = Math.max(1, innerHeight);
-  const shown = n => n && getComputedStyle(n).display !== 'none' && n.getBoundingClientRect().height > 0;
-  const tabs = document.getElementById('tabs'), strip = document.getElementById('strip'),
-        deck = document.getElementById('deck');
-  let top = 0, bot = H;
-  if (shown(tabs)) top = tabs.getBoundingClientRect().bottom;
-  else if (shown(strip)) top = strip.getBoundingClientRect().bottom;
-  if (shown(deck)) bot = deck.getBoundingClientRect().top;
-  top += 14; bot -= 14;
-  if (bot - top < 90){ top = 0; bot = H; }          // degenerate window: take the lot
+/* The stage: what the strip, the deck and (on a wide screen) the log and the meters leave free. */
+let STAGE = {l:0, r:1, t:0, b:1};
+function stageRect(){
+  const W = Math.max(1, innerWidth), H = Math.max(1, innerHeight);
+  const shown = n => { if (!n || getComputedStyle(n).display === 'none') return null;
+    const r = n.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? r : null; };
+  let t = 0, b = H, l = 0, r = W, x;
+  if ((x = shown($('#tabs')))) t = x.bottom; else if ((x = shown($('#strip')))) t = x.bottom;
+  if ((x = shown($('#deck')))) b = x.top;
+  if (!PHONE){
+    if ((x = shown($('#index')))) l = x.right;
+    if ((x = shown($('#meter')))) r = x.left;
+  }
+  t += 14; b -= 14; l += 14; r -= 14;
+  if (b - t < 90){ t = 0; b = H; }                  // degenerate window: take the lot
+  if (r - l < 120){ l = 0; r = W; }
+  return STAGE = {l, r, t, b};
+}
+/* Camera position and aim that put `centre` in the middle of the stage, seen from `dir` at `d`. */
+function aimFor(centre, dir, d, outPos, outAim){
+  const W = Math.max(1, innerWidth), H = Math.max(1, innerHeight), st = STAGE;
+  const Vh = 2 * d * Math.tan(camera.fov * Math.PI / 360), Vw = Vh * (W / H);
+  const fwd = dir.clone().negate(), right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
+  const up2 = new THREE.Vector3().crossVectors(right, fwd).normalize();
+  const ox = ((st.l + st.r)/2 - W/2) / W * Vw, oy = ((st.t + st.b)/2 - H/2) / H * Vh;
+  outAim.copy(centre).addScaledVector(right, -ox).addScaledVector(up2, oy);
+  outPos.copy(outAim).addScaledVector(dir, d);
+}
+/* The title stands beside the specimen when there is room, else it shrinks to the stage's corner. */
+function placeStamp(coreHalfPx){
+  const st = el.stamp.style;
+  if (PHONE){                                       // one column: over the specimen, so just the name
+    st.left = st.top = st.maxWidth = st.transform = '';
+    if (S.current >= 0) el.stamp.dataset.fit = 'tight'; else delete el.stamp.dataset.fit;
+    return;
+  }
+  const S_ = STAGE, cx = (S_.l + S_.r)/2, gap = cx - coreHalfPx - S_.l;
+  if (gap >= 230 && (S.view === 'read' || S.current < 0)){
+    st.left = (S_.l + 18) + 'px'; st.top = ((S_.t + S_.b)/2) + 'px'; st.transform = 'translateY(-50%)';
+    st.maxWidth = Math.min(420, gap - 48) + 'px'; delete el.stamp.dataset.fit;
+  } else {
+    st.left = (S_.l + 10) + 'px'; st.top = (S_.t + 4) + 'px'; st.transform = 'none';
+    st.maxWidth = Math.min(420, S_.r - S_.l - 20) + 'px'; el.stamp.dataset.fit = 'tight';
+  }
+}
 
-  const band = clamp((bot - top) / H, 0.15, 1);     // share of viewport we own
-  const fc = ((top + bot) * 0.5) / H;               // and where its centre sits
+function frameRead(){
+  const H = Math.max(1, innerHeight), W = Math.max(1, innerWidth);
+  const st = stageRect();
+  const band = clamp((st.b - st.t) / H, 0.15, 1);   // share of viewport we own
   const d = PHONE ? 8.4 : 7.4;
   const tanH = Math.tan(camera.fov * Math.PI / 360);
   const Vh = 2 * d * tanH;
 
-  const k = clamp((band * Vh) / CORE_SPAN, 0.2, 1.3);
+  // fill the stage's height, unless the stage is narrower than the specimen would then be wide
+  const kW = ((st.r - st.l) / W) * Vh * (W / H) / 2.6;
+  const k = clamp(Math.min((band * Vh) / CORE_SPAN, kW), 0.2, 1.3);
   head.scale.setScalar(k);
   dustGrp.scale.setScalar(k);
   gridMesh.position.y = -(COL_H/2 + 0.55) * k;
@@ -898,9 +1149,18 @@ function frameRead(){
   VIEWS.rack.p.set(rx, floor + (PHONE ? 3.4 : 3.2), -6.4 + (PHONE ? 9.0 : 9.6));
   if (S.view === 'rack'){ wantPos.copy(VIEWS.rack.p); wantAim.copy(VIEWS.rack.a); }
 
-  VIEWS.read.a.set(PHONE ? COL_X : COL_X - 0.40, (fc - 0.5) * Vh, 0);
-  VIEWS.read.p.copy(READ_DIR).multiplyScalar(d).add(VIEWS.read.a);
+  aimFor(new THREE.Vector3(COL_X, 0, 0), READ_DIR, d, VIEWS.read.p, VIEWS.read.a);
   if (S.view === 'read'){ wantPos.copy(VIEWS.read.p); wantAim.copy(VIEWS.read.a); }
+  placeStamp((R0 + RM + 0.5) * k / (Vh * W / H) * W);
+}
+/* SPACE: orbit the ball at a distance that makes it fill most of the stage's shorter side */
+function frameSpace(){
+  const H = Math.max(1, innerHeight), st = STAGE;
+  const target = 0.84 * Math.min(st.r - st.l, st.b - st.t);
+  const d = (2 * RB * H / Math.max(60, target)) / (2 * Math.tan(camera.fov * Math.PI / 360));
+  const ce = Math.cos(ORB.el);
+  const dir = new THREE.Vector3(Math.sin(ORB.az)*ce, Math.sin(ORB.el), Math.cos(ORB.az)*ce);
+  aimFor(ball.position, dir, d, wantPos, wantAim);
 }
 
 function resize(){
@@ -915,7 +1175,6 @@ function resize(){
   postMat.uniforms.uRes.value.set(W,H);
   frameRead();
   UI.ruler();
-  placeSpace();
 }
 addEventListener('resize', resize);
 addEventListener('orientationchange', () => setTimeout(resize, 250));
@@ -971,7 +1230,7 @@ const el = {
   stamp:$('#stamp'), stTitle:$('#st-title'), stMeta:$('#st-meta'), label:$('#label'),
   gain:$('#gain'), cgain:$('#c-gain'), barL:$('#bar-l'), barR:$('#bar-r'), scale:$('#scale'),
   search:$('#search'), dl:$('#k-dl'), send:$('#sendkeys'), sendrow:$('#sendrow'), link:$('#k-link'), zone:$('#loopzone'), rgn:$('#rgn'), mm:[$('#mm-l > u'), $('#mm-r > u')], tabs:$('#tabs'),
-  actrow:$('#actrow'), monrow:$('#monrow'), space:$('#space')
+  actrow:$('#actrow'), monrow:$('#monrow')
 };
 const ictx = el.env.getContext('2d');
 const PLAY_ICON = '<svg viewBox="0 0 16 16"><path d="M4 3l9 5-9 5z"/></svg>';
@@ -1029,6 +1288,7 @@ const UI = {
       el.zone.style.width = ((S.rgnB - S.rgnA)/d*100) + '%';
       el.rgn.textContent = 'A/B ' + clock(S.rgnA).slice(0,8) + '–' + clock(S.rgnB).slice(0,8);
     } else el.rgn.textContent = '';
+    if (!marking) UI.actions();
   },
 
   mode(){
@@ -1085,23 +1345,27 @@ const UI = {
     } else el.ticks.innerHTML = '';
   },
 
-  /* RENAME / DELETE: anything in the library, never the archive */
+  /* THIS SOUND: rename and delete (anything in the library, never the archive), and the two ways of
+     keeping a new sound from this one: the marked A/B, and what you hear at the receiver. */
   actions(){
     const e = S.entries[S.current];
-    const on = !!(LIB && e && e.local && !S.busy);
-    el.actrow.hidden = !on;
-    if (!on){ delete el.actrow.dataset.mode; return; }
+    const has = !!(LIB && e && A.buffer && !S.busy);
+    const rgn = S.rgnA != null && S.rgnB > S.rgnA;
+    const keys = [];
+    if (has && e.local) keys.push(['rename', 'Rename'], ['delete', 'Delete']);
+    if (has && rgn) keys.push(['keepab', 'Keep A/B']);
+    if (has && ambiOn()) keys.push(['keepheard', rgn ? 'Keep A/B as heard' : 'Keep what you hear']);
+    el.actrow.hidden = !keys.length;
+    if (!keys.length){ delete el.actrow.dataset.mode; return; }
     if (el.actrow.dataset.mode === 'rename') return;       // leave the field alone while you type
-    el.actrow.innerHTML = '<span>This sound</span>' +
-      '<button class="act" type="button" data-act="rename">Rename</button>' +
-      '<button class="act" type="button" data-act="delete">Delete</button>';
+    el.actrow.innerHTML = '<span>This sound</span>' + keys.map(([a, t]) =>
+      `<button class="act" type="button" data-act="${a}">${t}</button>`).join('');
   },
 
   /* LISTEN AS: only for files with more than two channels */
   monitor(){
     const n = MON.n;
     el.monrow.hidden = !(n > 2);
-    el.space.hidden = !(n === 4 && MON.mode !== 'mix' && MON.dec.length);
     if (n > 2){
       const modes = n === 4 && MON.dec.length ? [['mix','Mix'], ['ambix','AmbiX'], ['fuma','FuMa']].map(([m, t]) =>
         `<button class="act" type="button" data-mon="${m}" aria-pressed="${MON.mode === m}">${t}</button>`).join('') : '';
@@ -1109,7 +1373,6 @@ const UI = {
         `<button class="act ch" type="button" data-ch="${c}" aria-pressed="${on}" title="Channel ${c+1}">${c+1}</button>`).join('') : '';
       el.monrow.innerHTML = `<span>${n} ch · listen as</span>${modes}${chans}`;
     }
-    placeSpace();
   },
 
   stamp(e){
@@ -1230,7 +1493,7 @@ async function selectEntry(i, opt = {}){
     ensureCtx(d.rate);
     setTrim(parseFloat(el.gain.value));
     const nch = d.ab.numberOfChannels;
-    MON.on = Array.from({length: nch}, () => true); MON.yaw = 0; MON.pitch = 0;
+    MON.on = Array.from({length: nch}, () => true); MON.yaw = 0; MON.pitch = 0; MON.pos = [0, 0, 0];
     MON.mode = nch === 4 && AMBI_RE.test(e.title + ' ' + nameOf(e)) ? 'ambix' : 'mix';
     buildMonitor(nch);
     buildCore(e.log);
@@ -1248,7 +1511,8 @@ async function selectEntry(i, opt = {}){
     if (opt.region) setRegion(opt.region[0], opt.region[1]);
     if (opt.seekTo) A.offset = clamp(opt.seekTo, 0, A.buffer.duration);
     UI.rows(); UI.ruler(); UI.transport(); UI.region(); UI.actions(); UI.monitor();
-    if (MON.mode !== 'mix') el.hint.textContent = 'B-format on headphones · drag the compass to turn';
+    if (ambiOn()){ buildField(e.log, MON.mode); setView('space'); }
+    else if (S.view === 'space') setView('read');
     frameRead();
     if (PHONE) setTab('read');
     if (opt.autoplay !== false) play();
@@ -1355,6 +1619,20 @@ async function download(i){
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2(), pointer = new THREE.Vector2();
 let dragging = false, hoverInst = -1, dragY = 0, dragT = 0, turnX = 0, turning = false;
+let spaceDrag = null, turnY = 0;
+const dragPlane = new THREE.Plane(), _hit = new THREE.Vector3();
+function moveReceiver(){
+  ray.setFromCamera(ndc, camera);
+  if (!ray.ray.intersectPlane(dragPlane, _hit)) return;
+  ball.worldToLocal(_hit);
+  let [x, y, z] = T2A(_hit.divideScalar(RB));
+  const r = Math.hypot(x, y, z);
+  if (r > POS_MAX){ x *= POS_MAX/r; y *= POS_MAX/r; z *= POS_MAX/r; }
+  MON.pos = [x, y, z];
+  if (r > 0.08 * POS_MAX){ MON.yaw = Math.atan2(y, x); MON.pitch = Math.asin(clamp(z / Math.max(r, 1e-6), -1, 1)); }
+  setMonitor();
+  el.hint.textContent = 'Receiver ' + heardLabel();
+}
 
 function setNdc(ev){
   ndc.x = (ev.clientX / innerWidth) * 2 - 1;
@@ -1373,7 +1651,18 @@ function seekFromRay(){
 
 renderer.domElement.addEventListener('pointerdown', ev => {
   setNdc(ev);
-  turnX = ev.clientX;
+  turnX = ev.clientX; turnY = ev.clientY;
+  // SPACE: grab the receiver if the finger lands on it, otherwise swing round the ball
+  if (S.view === 'space'){
+    ray.setFromCamera(ndc, camera);
+    if (ray.intersectObject(rcvPick, false)[0]){
+      rcv.getWorldPosition(_hit);
+      dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(_q2), _hit);
+      spaceDrag = 'rcv';
+    } else spaceDrag = 'orbit';
+    renderer.domElement.setPointerCapture(ev.pointerId);
+    return;
+  }
   // inside the core there is nothing to aim at: up and down travel through time, sideways turns
   if (S.view === 'dive'){
     if (A.buffer){ dragging = true; dragY = ev.clientY; dragT = position(); renderer.domElement.setPointerCapture(ev.pointerId); }
@@ -1392,6 +1681,11 @@ renderer.domElement.addEventListener('pointerdown', ev => {
 });
 renderer.domElement.addEventListener('pointermove', ev => {
   setNdc(ev);
+  if (spaceDrag === 'rcv'){ moveReceiver(); return; }
+  if (spaceDrag === 'orbit'){
+    ORB.az -= (ev.clientX - turnX) * 0.008; ORB.el = clamp(ORB.el + (ev.clientY - turnY) * 0.006, -1.25, 1.25);
+    turnX = ev.clientX; turnY = ev.clientY; return;
+  }
   if (dragging && S.view === 'dive'){
     const perPx = A.buffer.duration / Math.max(240, innerHeight * 1.4);
     seek(dragT - (ev.clientY - dragY) * perPx);      // pull the tunnel toward you to go deeper
@@ -1421,13 +1715,18 @@ renderer.domElement.addEventListener('pointermove', ev => {
     el.label.classList.add('on');
   } else el.label.classList.remove('on');
 });
-addEventListener('pointerup', () => { dragging = false; turning = false; });
-addEventListener('pointercancel', () => { dragging = false; turning = false; });
+addEventListener('pointerup', () => { dragging = false; turning = false; spaceDrag = null; });
+addEventListener('pointercancel', () => { dragging = false; turning = false; spaceDrag = null; });
+renderer.domElement.addEventListener('dblclick', () => {
+  if (S.view !== 'space') return;
+  MON.pos = [0, 0, 0]; MON.yaw = 0; MON.pitch = 0; setMonitor();
+  el.hint.textContent = 'Receiver back at the centre, facing front';
+});
 
 addEventListener('touchmove', ev => {
   if (ev.touches && ev.touches.length > 1) return;   // leave pinch-zoom alone
   const t = ev.target;
-  if (t instanceof Element && t.closest('#rows')) return;
+  if (t instanceof Element && t.closest('#rows, #tools')) return;   // lists that scroll themselves
   if (ev.cancelable) ev.preventDefault();
 }, {passive:false});
 renderer.domElement.addEventListener('pointerleave', () => el.label.classList.remove('on'));
@@ -1467,6 +1766,7 @@ function endRuler(){
     marking = false;
     if (S.rgnB - S.rgnA < 0.12){ clearRegion(); el.hint.textContent = 'A/B cleared'; }
     else { seek(S.rgnA); el.hint.textContent = 'A/B set — loop confines playback to it'; }
+    UI.actions();                                   // KEEP A/B appears once the region is let go
   }
   rulerDown = false;
 }
@@ -1494,21 +1794,24 @@ el.link.onclick = copyLink;
 /* READ → DIVE → RACK. DIVE puts the camera inside the core just above the read head and keeps it
    there: the strata come up at you as the recording plays, the live spectrum is the ring at your feet. */
 const VIEW_HINT = {
+  space: 'Space · drag the teal receiver toward a sound, drag around it to orbit, double-click to recentre',
   read: 'Read head · drag the core to seek, drag beside it to turn',
   dive: 'Dive · riding the read head — drag up or down to travel, sideways to turn',
   rack: 'Rack · tap a core to load it'
 };
+const viewsNow = () => ambiOn() ? ['space', ...VIEW_ORDER] : VIEW_ORDER;
 function setView(v){
   S.view = v; document.body.dataset.view = v;
-  if (v !== 'dive'){ wantPos.copy(VIEWS[v].p); wantAim.copy(VIEWS[v].a); }
-  const k = $('#k-view');
-  k.textContent = v === 'read' ? '◱' : v === 'dive' ? '◎' : '▤';
+  if (v === 'read' || v === 'rack'){ wantPos.copy(VIEWS[v].p); wantAim.copy(VIEWS[v].a); }
+  const k = $('#k-view'), list = viewsNow();
+  k.textContent = {space:'◍', read:'◱', dive:'◎', rack:'▤'}[v];
   k.setAttribute('aria-pressed', String(v !== 'read'));
-  const nx = VIEW_ORDER[(VIEW_ORDER.indexOf(v) + 1) % VIEW_ORDER.length];
+  const nx = list[(list.indexOf(v) + 1) % list.length];
   k.title = 'View: ' + v.toUpperCase() + ' — next ' + nx.toUpperCase() + ' (V)';
   el.hint.textContent = VIEW_HINT[v];
+  frameRead();
 }
-$('#k-view').onclick = () => setView(VIEW_ORDER[(VIEW_ORDER.indexOf(S.view) + 1) % VIEW_ORDER.length]);
+$('#k-view').onclick = () => { const l = viewsNow(); setView(l[(l.indexOf(S.view) + 1) % l.length]); };
 el.gain.addEventListener('input', () => {
   const v = parseFloat(el.gain.value);
   el.cgain.textContent = (v > 0 ? '+' : '') + v.toFixed(1);
@@ -1580,6 +1883,7 @@ el.actrow.addEventListener('click', async ev => {
     return;
   }
   if (act === 'cancel'){ delete el.actrow.dataset.mode; UI.actions(); return; }
+  if (act === 'keepab' || act === 'keepheard'){ keepCut(act === 'keepheard' ? 'heard' : 'ab'); return; }
   if (act === 'save'){ commitRename(); return; }
   if (act === 'delete'){
     if (!b.classList.contains('armed')){            // two taps, no dialog: the second one deletes
@@ -1600,12 +1904,43 @@ el.actrow.addEventListener('keydown', ev => {
   if (ev.key === 'Enter'){ ev.preventDefault(); commitRename(); }
   if (ev.key === 'Escape'){ delete el.actrow.dataset.mode; UI.actions(); }
 });
+/* A new sound from this one, kept in the library beside it: the A/B region as recorded, or (for
+   B-format) what you hear at the receiver, as stereo. Float in, float out; nothing clamped. */
+let keeping = false;
+async function keepCut(kind){
+  const e = S.entries[S.current];
+  if (!e || !A.buffer || keeping) return;
+  const region = (S.rgnA != null && S.rgnB > S.rgnA) ? [S.rgnA, S.rgnB] : null;
+  const span = region ? clock(region[0]).slice(3, 8) + '–' + clock(region[1]).slice(3, 8) : '';
+  keeping = true;
+  try {
+    let chans, rate, title, tags, notes;
+    if (kind === 'heard'){
+      ({chans, rate} = await renderHeard(e, region));
+      title = (e.given || e.title) + ' — heard ' + heardLabel().replace(' · ', ', ') + (span ? ' · ' + span : '');
+      tags = ['heard', MON.mode]; notes = 'Binaural render of ' + (e.given || e.title) + ', receiver ' + heardLabel();
+    } else {
+      if (!region) return;
+      el.hint.textContent = (e.masterUrl ? 'Pulling the float master · ' : '') + 'Cutting A/B';
+      ({chans, rate} = await Library.samplesOf(e));
+      const a = Math.max(0, Math.floor(region[0]*rate)), b = Math.ceil(region[1]*rate);
+      chans = chans.map(c => c.subarray(a, b));
+      title = (e.given || e.title) + ' — A/B ' + span; tags = ['cut']; notes = 'A/B ' + span + ' of ' + (e.given || e.title);
+    }
+    const file = new File([wavFloat(chans, rate)], title.replace(/[^\w.-]+/g, '-').slice(0, 60) + '.wav', {type: 'audio/wav'});
+    await addFiles([file], {select: false, meta: {title, tags, notes, category: String(e.cat || 'FIELD').toLowerCase(),
+      from: e.source || (e.id ? {tool: 'archive', id: e.id} : undefined)}});
+  } catch (err){ el.hint.textContent = 'Could not keep it — ' + (err.message || err); }
+  finally { keeping = false; }
+}
 el.monrow.addEventListener('click', ev => {
   const b = ev.target.closest('button'); if (!b) return;
   if (b.dataset.mon){
     MON.mode = b.dataset.mon;
-    el.hint.textContent = MON.mode === 'mix' ? 'Every channel you leave on, to both ears'
-      : (MON.mode === 'ambix' ? 'AmbiX' : 'FuMa') + ' B-format on headphones · drag the compass to turn';
+    const cur = S.entries[S.current];
+    if (MON.mode === 'mix'){ if (S.view === 'space') setView('read'); el.hint.textContent = 'Every channel you leave on, to both ears'; }
+    else { buildField(cur && cur.log, MON.mode); setView('space'); }
+    UI.actions();
   }
   if (b.dataset.ch){
     const c = +b.dataset.ch;
@@ -1614,70 +1949,6 @@ el.monrow.addEventListener('click', ev => {
   }
   setMonitor(); UI.monitor(); frameRead();
 });
-
-/* the compass: you at the centre, your front at the top. Dots are where the energy came from over the
-   last moments of the core, brighter the more it came from one place. Drag to turn your head. */
-const sctx = el.space.getContext('2d');
-const SPACE_PX = 148;
-let spaceDrag = null;
-function placeSpace(){
-  if (el.space.hidden) return;
-  const d = $('#deck').getBoundingClientRect(), mtr = $('#meter');
-  const m = mtr.getBoundingClientRect(), side = getComputedStyle(mtr).display !== 'none' && m.width > 0;
-  el.space.style.right = (side ? innerWidth - m.left + 14 : 14) + 'px';
-  el.space.style.bottom = (innerHeight - d.top + 14) + 'px';
-}
-function drawSpace(f){
-  if (el.space.hidden) return;
-  const cur = S.entries[S.current], iv = cur && cur.log && cur.log.iv;
-  const dpr = Math.min(devicePixelRatio, 2), W = SPACE_PX;
-  if (el.space.width !== W*dpr){ el.space.width = el.space.height = W*dpr; }
-  const g = sctx, c = W/2, R = 54;
-  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, W);
-  g.fillStyle = 'rgba(8,7,6,.78)'; g.beginPath(); g.arc(c, c, R+14, 0, TAU); g.fill();
-  g.strokeStyle = 'rgba(207,200,188,.22)'; g.lineWidth = 1;
-  for (const r of [R, R*0.5]){ g.beginPath(); g.arc(c, c, r, 0, TAU); g.stroke(); }
-  g.beginPath(); g.moveTo(c-R, c); g.lineTo(c+R, c); g.moveTo(c, c-R); g.lineTo(c, c+R); g.stroke();
-  // your front
-  g.fillStyle = 'rgba(159,240,214,.95)';
-  g.beginPath(); g.moveTo(c, c-R-9); g.lineTo(c-5, c-R-2); g.lineTo(c+5, c-R-2); g.fill();
-  // the recording's own front, which swings round as you turn
-  const fx = c + Math.sin(MON.yaw)*R, fy = c - Math.cos(MON.yaw)*R;
-  g.strokeStyle = 'rgba(231,178,76,.9)'; g.lineWidth = 2;
-  g.beginPath(); g.moveTo(c + Math.sin(MON.yaw)*(R-6), c - Math.cos(MON.yaw)*(R-6)); g.lineTo(fx, fy); g.stroke();
-  if (iv){
-    const sl = Math.min(SLICES-1, Math.floor(f*SLICES)), fuma = MON.mode === 'fuma', TR = 16;
-    for (let k = TR; k >= 0; k--){
-      const s = sl - k; if (s < 0) continue;
-      const o = s*4, e0 = iv[o+3]; if (e0 <= 1e-12) continue;
-      const X = fuma ? iv[o] : iv[o+2], Y = fuma ? iv[o+1] : iv[o], Z = fuma ? iv[o+2] : iv[o+1];
-      const m = Math.hypot(X, Y, Z); if (!(m > 0)) continue;
-      const focus = clamp(m / e0 * (fuma ? Math.SQRT1_2 : 1), 0, 1);   // 1 = one place, 0 = all round
-      const az = Math.atan2(Y, X) - MON.yaw, elv = Math.atan2(Z, Math.hypot(X, Y));
-      const r = R * clamp(1 - elv/(Math.PI/2), 0, 1.2);
-      const x = c - Math.sin(az)*r, y = c - Math.cos(az)*r;
-      const life = 1 - k/(TR+1), lvl = cur.log.rmsN[s];
-      g.fillStyle = `rgba(231,178,76,${((0.12 + 0.88*life) * (0.25 + 0.75*focus)).toFixed(3)})`;
-      g.beginPath(); g.arc(x, y, 1.4 + 4.6*lvl*life, 0, TAU); g.fill();
-    }
-  }
-  g.fillStyle = 'rgba(207,200,188,.7)'; g.font = '9px ' + getComputedStyle(document.body).fontFamily;
-  g.textAlign = 'center';
-  const deg = a => Math.round(a*180/Math.PI);
-  g.fillText('TURN ' + deg(-MON.yaw) + '°  ·  TILT ' + deg(MON.pitch) + '°', c, W - 4);
-}
-el.space.addEventListener('pointerdown', ev => {
-  spaceDrag = {x: ev.clientX, y: ev.clientY, yaw: MON.yaw, pitch: MON.pitch};
-  el.space.setPointerCapture(ev.pointerId);
-});
-el.space.addEventListener('pointermove', ev => {
-  if (!spaceDrag) return;
-  MON.yaw = spaceDrag.yaw - (ev.clientX - spaceDrag.x) * 0.012;       // drag right, turn right
-  MON.pitch = clamp(spaceDrag.pitch - (ev.clientY - spaceDrag.y) * 0.01, -1.2, 1.2);
-  setMonitor();
-});
-for (const t of ['pointerup', 'pointercancel']) el.space.addEventListener(t, () => { spaceDrag = null; });
-el.space.addEventListener('dblclick', () => { MON.yaw = 0; MON.pitch = 0; setMonitor(); });
 
 el.search.addEventListener('input', () => { S.query = el.search.value.trim().toLowerCase(); UI.rows(); });
 el.dl.onclick = () => { if (S.current >= 0) download(S.current); };
@@ -1731,7 +2002,7 @@ async function filesFromDrop(dt){
   return out;
 }
 
-async function addFiles(files){
+async function addFiles(files, opt = {}){
   const keep = [...files].filter(f => AUDIO_RE.test(f.name))
     .sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric:true}));
   if (!keep.length){ el.hint.textContent = 'No audio in that drop'; return; }
@@ -1745,7 +2016,7 @@ async function addFiles(files){
     };
     if (LIB){                                   // in Workbench a file you open is kept, so every tool can reach it
       if (keep.length > 1) el.hint.textContent = 'Keeping ' + (fresh.length + 1) + ' of ' + keep.length;
-      const k = await Library.keep(f);
+      const k = await Library.keep(f, opt.meta);
       if (k){ Object.assign(e, k); kept++; } else missed++;
     }
     fresh.push(e);
@@ -1756,14 +2027,22 @@ async function addFiles(files){
     S.entries.unshift(...fresh.reverse());      // newest first, the order a reload will list them in
     if (S.current >= 0) S.current += fresh.length;   // the core on the head moved down with the rest
     first = 0;
-    el.hint.textContent = kept ? 'Kept ' + kept + ' in your library' + (missed ? ' · ' + missed + ' could not be kept (this browser cannot write files)' : '')
-                               : 'Opened for now · this browser cannot keep files';
+    el.hint.textContent = opt.meta ? (kept ? 'Kept “' + fresh[0].title + '” in your library' : 'This browser cannot keep files')
+      : kept ? 'Kept ' + kept + ' in your library' + (missed ? ' · ' + missed + ' could not be kept (this browser cannot write files)' : '')
+             : 'Opened for now · this browser cannot keep files';
     libCount();
   } else {
     first = S.entries.length;
     S.entries.push(...fresh);
   }
   layoutRack(S.entries.length); UI.filters(); UI.rows();
+  if (opt.select === false){
+    const cur = S.entries[S.current];             // the rack was rebuilt: give the core on the head its colour back
+    if (cur && cur.log){ let cs = 0, es = 0;
+      for (let k = 0; k < SLICES; k++){ cs += cur.log.cen[k]*cur.log.rmsN[k]; es += cur.log.rmsN[k]; }
+      tintRack(S.current, mineral(es > 0 ? cs/es : 400, 0.55).clone()); }
+    return;
+  }
   selectEntry(first);
 }
 const dropEl = $('#drop');
@@ -1894,7 +2173,7 @@ const Library = (() => {
               src: {kind: 'shelf', dir: d, json: name, audio: base(j.file)}, given: j.title || undefined,
               size: j.bytes, dur: j.durationSec, made, date: made ? day(made) : undefined,
               cat: catOfShelf(j, tool),
-              tags: ['YOURS', up(tool === OWN ? 'OPENED' : tool)].concat((Array.isArray(j.tags) ? j.tags : []).map(t => up(t))),
+              tags: ['YOURS', up(tool === OWN ? (j.from ? 'KEPT' : 'OPENED') : tool)].concat((Array.isArray(j.tags) ? j.tags : []).map(t => up(t))),
               notes: j.notes ? String(j.notes) : undefined,
               license: tool === OWN ? 'Opened from your files and kept here.' : 'Yours. Made with ' + up(tool) + ' on this device.'
             });
@@ -1922,7 +2201,7 @@ const Library = (() => {
     await w.write(data); await w.close();
   }
   /* Keep a file you opened: shelf/adit/<id>.<ext> plus its sidecar. Null where this browser can't write. */
-  async function keep(f){
+  async function keep(f, meta){
     let d = null, id = '', file = '';
     try {
       const r = await opfs(); if (!r) return null;
@@ -1932,12 +2211,16 @@ const Library = (() => {
       file = id + '.' + ext;
       await write(d, file, f);
       const now = Date.now();
-      const j = {v: 1, tool: OWN, id, title: f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '), file, bytes: f.size,
-                 made: new Date(now).toISOString(), notes: 'Opened from ' + f.name};
+      const j = {v: 1, tool: OWN, id, title: (meta && meta.title) || f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '),
+                 file, bytes: f.size, made: new Date(now).toISOString(), notes: (meta && meta.notes) || 'Opened from ' + f.name};
+      if (meta){ if (meta.tags) j.tags = meta.tags; if (meta.category) j.category = meta.category; if (meta.from) j.from = meta.from; }
       await write(d, id + '.json', JSON.stringify(j));               // written last: no sidecar, not listed
-      return {handle: {dir: d, name: file}, dlName: f.name, tags: ['YOURS', 'OPENED'], cat: 'SAMPLES',
+      return {handle: {dir: d, name: file}, dlName: f.name, title: up(j.title, 80),
+              tags: ['YOURS', meta ? 'KEPT' : 'OPENED'].concat((j.tags || []).map(t => up(t))),
+              cat: meta ? catOfShelf(j, OWN) : 'SAMPLES',
               src: {kind: 'shelf', dir: d, json: id + '.json', audio: file}, given: j.title, source: {tool: OWN, id},
-              made: now, date: day(now), notes: j.notes, license: 'Opened from your files and kept here.'};
+              made: now, date: day(now), notes: j.notes,
+              license: meta ? 'Made in ADIT on this device.' : 'Opened from your files and kept here.'};
     } catch(_){
       /* Where getFileHandle works but createWritable does not (Safari before 26) an empty file is left
          behind. It is ours, in shelf/adit/, so take it back out. */
@@ -1964,13 +2247,13 @@ const Library = (() => {
   /* Hand a sound to another tool: write it to shelf/_handoff/ as 32-bit float WAV (the A/B region only, if
      one is marked), leave a note in localStorage, open the tool. The tool reads the note (WORKBENCH.md,
      "Handing a sound on"). Old hand-offs are cleared on load. */
-  async function handoff(to, e, region){
+  async function handoff(to, e, region, heard){
     const r = await opfs(); if (!r) throw new Error('this browser has no file store');
-    const {chans, rate} = await samplesOf(e);
-    let cut = chans, name = slug(e.title).toLowerCase();
+    const {chans, rate} = heard || await samplesOf(e);              // a render arrives already cut to A/B
+    let cut = chans, name = slug(e.title).toLowerCase() + (heard ? '-heard' : '');
     if (region){
       const a = Math.max(0, Math.floor(region[0] * rate)), b = Math.ceil(region[1] * rate);
-      cut = chans.map(c => c.subarray(a, b));
+      if (!heard) cut = chans.map(c => c.subarray(a, b));
       name += '-' + region[0].toFixed(2) + '-' + region[1].toFixed(2);
     }
     if (!cut.length || !cut[0].length) throw new Error('nothing to send in that region');
@@ -1980,7 +2263,7 @@ const Library = (() => {
     if (!d) throw new Error('could not open the shelf');
     const file = Date.now().toString(36) + '-' + name;
     await write(d, file, data);
-    const note = {v: 1, to, file: SHELF + '/' + HANDOFF + '/' + file, name, title: e.title,
+    const note = {v: 1, to, file: SHELF + '/' + HANDOFF + '/' + file, name, title: heard ? e.title + ' — HEARD' : e.title,
                   from: {tool: 'adit', source: e.source || (e.id ? {tool: 'archive', id: e.id} : null)},
                   region: region || null, bytes: data.byteLength, at: Date.now()};
     localStorage.setItem('wb.handoff', JSON.stringify(note));
@@ -2038,7 +2321,7 @@ const Library = (() => {
     await s.dir.removeEntry(s.audio).catch(() => {});
   }
 
-  return {scan, fileOf, keep, handoff, sweep, accepting, rename, remove};
+  return {scan, fileOf, keep, handoff, sweep, accepting, rename, remove, samplesOf};
 })();
 
 /* A 32-bit float WAV, exactly the samples given: nothing clamped, nothing dithered. */
@@ -2073,7 +2356,9 @@ async function sendTo(tool){
     + 'Handing ' + (region ? 'A/B of ' : '') + e.title + ' to ' + tool.name;
   sending = true;
   try {
-    await Library.handoff(tool.id, e, region);
+    // B-format goes on as what you hear at the receiver: that is what the position is for
+    const heard = ambiOn() ? await renderHeard(e, region) : null;
+    await Library.handoff(tool.id, e, region, heard);
     location.href = '../' + encodeURIComponent(tool.id) + '/?handoff';   // a sibling folder: ADIT is at /adit/ in Workbench
   } catch (err){
     sending = false;
@@ -2141,7 +2426,13 @@ function tick(now){
   const dt = Math.min(0.05, (now - last)/1000); last = now;
 
   const f = UI.frame();
-  drawSpace(f);
+  if (S.view === 'space'){
+    if (!spaceDrag && !REDUCED) ORB.az += dt * 0.05;          // a slow walk round, until you take hold
+    frameSpace();
+    updateField(f, A.buffer ? A.buffer.duration : 1);
+  }
+  ball.visible = S.view === 'space';
+  rackGrp.visible = S.view !== 'space';
 
   // DIVE: ride just above the read head, looking down and a little ahead into what is coming
   if (S.view === 'dive'){
@@ -2152,7 +2443,7 @@ function tick(now){
 
   // camera: eased, with a hand's-width of pointer parallax (none inside the core)
   const k = REDUCED ? 1 : 1 - Math.pow(0.0015, dt);
-  const par = S.view === 'dive' ? 0 : PARALLAX;
+  const par = S.view === 'dive' || S.view === 'space' ? 0 : PARALLAX;
   camPos.lerp(wantPos, k); camAim.lerp(wantAim, k);
   camera.position.copy(camPos).add(new THREE.Vector3(pointer.x*0.30*par, pointer.y*0.20*par, 0));
   camera.lookAt(camAim);
@@ -2160,7 +2451,7 @@ function tick(now){
   // the core turns slowly, and holds still while you are reading a depth or turning it by hand
   if (!dragging && !turning && !REDUCED) spin += dt * 0.085;
   head.rotation.y = spin;
-  head.visible = S.view !== 'rack';      // choosing a core, not reading one: the specimen steps out of the way
+  head.visible = S.view !== 'rack' && S.view !== 'space';   // the specimen steps aside for the rack and the ball
 
   if (A.playing && A.src && !A.src.loop && S.rgnB != null && position() >= S.rgnB - 0.004) endOfCore();
 
@@ -2218,7 +2509,7 @@ function tick(now){
   requestAnimationFrame(frame);
   requestAnimationFrame(() => { resize(); camPos.copy(wantPos); camAim.copy(wantAim); });
   window.__adit.ready = true;
-  if (LIB) window.__adit.library = {S, Library, sendTo, MON, meters};   // for end-to-end tests
+  if (LIB) window.__adit.library = {S, Library, sendTo, MON, meters, setMonitor, renderHeard};   // for end-to-end tests
   boot('ready');
   setTimeout(() => $('#boot').classList.add('done'), 900);
 })();

@@ -206,7 +206,9 @@ const ctx2d = () => new Proxy({}, {
   get(t, k){
     if (k in t) return t[k];
     if (k === 'canvas') return null;
-    return (t[k] = (...a) => (k === 'measureText' ? {width:10} : undefined));
+    // gradients are objects you add stops to; everything else returns nothing
+    return (t[k] = (...a) => (k === 'measureText' ? {width:10}
+      : /Gradient$/.test(k) ? {addColorStop(){}} : undefined));
   },
   set(t,k,v){ t[k] = v; return true; }
 });
