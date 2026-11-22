@@ -1256,6 +1256,10 @@ const UI = {
   rows(){
     const q = S.query;
     const list = filtered();
+    /* a kit is two or more sounds (WORKBENCH.md: a kit note carries 2 to 16); one left alone is just a sound */
+    const kitN = new Map();
+    for (const e of S.entries) if (e.kit) kitN.set(e.kit.key, (kitN.get(e.kit.key) || 0) + 1);
+    const kitKey = e => e.kit && kitN.get(e.kit.key) > 1 ? e.kit.key : null;
     el.count.textContent = (q || S.seam !== 'ALL')
       ? pad(list.length,3) + '/' + pad(S.entries.length,3) : pad(S.entries.length,3);
     if (!list.length){
@@ -1270,7 +1274,7 @@ const UI = {
                     e.badge || extOf(e),
                     e.size ? bytes(e.size) : null,
                     mx ? '↓ ' + mx : null].filter(Boolean).join('  ·  ');
-      return `<div class="row${e.failed?' bad':''}${e.kit?' inkit':''}" role="option" tabindex="0" data-i="${i}"
+      return `<div class="row${e.failed?' bad':''}${kitKey(e)?' inkit':''}" role="option" tabindex="0" data-i="${i}"
             aria-current="${i===S.current}" aria-selected="${i===S.current}">
          <span class="n">${pad(i+1,3)}</span>
          <span class="c"><span class="t">${esc(e.title)}</span><span class="tag">${esc(meta)}</span></span>
@@ -1294,7 +1298,7 @@ const UI = {
     };
     const seen = new Set(), out = [];
     for (const it of list){
-      const k = it.e.kit && it.e.kit.key;
+      const k = kitKey(it.e);
       if (k){
         if (!seen.has(k)){ seen.add(k); out.push(kitRow(k)); }
         if (!(S.openKits.has(k) || q)) continue;
@@ -2328,8 +2332,8 @@ const Library = (() => {
     for (let k = 0; k < members.length; k++){
       const e = members[k];
       if (progress) progress(k, members.length);
-      const {chans, rate} = await samplesOf(e);
-      const data = wavFloat(chans, rate);
+      /* a wavetable in a kit goes byte for byte too: its 'clm ' chunk is what makes the pad a synth */
+      const data = isWaves(e) ? await (await fileOf(e)).arrayBuffer() : (s => wavFloat(s.chans, s.rate))(await samplesOf(e));
       const name = String(k + 1).padStart(2, '0') + '-' + slug(e.given || e.title).toLowerCase() + '.wav';
       const file = stamp + '-' + name;
       await write(d, file, data);
@@ -2463,7 +2467,7 @@ function groupKits(list){
 }
 async function sendKit(key, tool){
   if (!tool || sending) return;
-  const all = kitOf(key); if (!all.length) return;
+  const all = kitOf(key); if (all.length < 2) return;
   const items = all.slice(0, KIT_MAX), name = all[0].kit.name;
   sending = true;
   try {

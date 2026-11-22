@@ -121,6 +121,14 @@ const LATHE = latheWav();
 put('shelf/lathe/w1-table.wav', LATHE);
 put('shelf/lathe/w1.json', JSON.stringify({v: 1, tool: 'lathe', id: 'w1', file: 'w1-table.wav', title: 'Hawk table',
   made: new Date(now - 200).toISOString()}));
+// a kit with one sound left in it is just a sound (a kit note carries 2 to 16)
+fathomSound('fathom', 'lone', 'Lone — kick', {id: 'k-lone', name: 'Lone kit', slot: 1}, now - 400);
+// two LATHE wavetables that share a kit: they go byte for byte inside a kit too
+for (const [id, slot] of [['t1', 1], ['t2', 2]]){
+  put(`shelf/lathe/${id}-table.wav`, LATHE);
+  put(`shelf/lathe/${id}.json`, JSON.stringify({v: 1, tool: 'lathe', id, file: id + '-table.wav', title: 'Table ' + slot,
+    made: new Date(now - 300 - slot).toISOString(), kit: {id: 'k-tables', name: 'Tables', slot}}));
+}
 
 const BUILD = {tools: [
   {id: 'ps1', name: 'PS-1', takes: ['audio', 'kit']},
@@ -281,6 +289,22 @@ const isFloatWav = u8 => { const dv = new DataView(u8.buffer, u8.byteOffset, u8.
   await L.sendTo({id: 'sluice', name: 'SLUICE'});
   const n2 = JSON.parse(STORE['wb.handoff'] || 'null') || {};
   need(n2.v === 1 && n2.kind === 'sound' && n2.to === 'sluice', 'a single sound says kind "sound"', JSON.stringify({v: n2.v, kind: n2.kind}));
+}
+
+/* ─── 6  a kit of one is a sound; wavetables in a kit go byte for byte ─── */
+{
+  await settle(10);
+  need(!kitRow('fathom:k-lone') && rowEls().some(n => titleOf(n) === 'LONE — KICK' && !n.attributes['data-kit']),
+       'a kit with one sound left lists as that sound, with no Send kit');
+  if (kitRow('lathe:k-tables').attributes['aria-expanded'] !== 'true') click(kitRow('lathe:k-tables'));
+  await settle();
+  const navs = NAV.length;
+  click(walk(rows).find(n => n.attributes['data-kitsend'] === 'ps1' && n.attributes['data-kitof'] === 'lathe:k-tables'));
+  for (let i = 0; i < 100 && NAV.length === navs; i++) await settle(10);
+  const n = JSON.parse(STORE['wb.handoff'] || 'null') || {}, src = new Uint8Array(LATHE);
+  const same = (n.items || []).map(x => get(x.file)).every(f => f && f.data.length === src.length && f.data.every((b, k) => b === src[k]));
+  need(n.kind === 'kit' && n.items && n.items.length === 2 && same, "wavetables in a kit are byte-identical to LATHE's, 'clm ' chunk and all",
+       `${n.items && n.items.length} items`);
 }
 
 /* ─── and the kit can go: delete takes each member, sidecar first ─── */
