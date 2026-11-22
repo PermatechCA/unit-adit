@@ -94,8 +94,23 @@ corner-mark script sets `window.__workbench`; when it's there, ADIT:
 - offers **Send to** for each tool that takes sound: the core on the head, or its A/B region, always as
   32-bit float WAV. An archive core sends its float master, the same file its download gives.
 
-It reads other tools' files and never changes them. The full contract is in Workbench's `WORKBENCH.md`.
+- **renames and deletes** anything in the library from the deck (Rename · Delete, two taps to delete):
+  a FIELD take, a PS-1 loop, a stem, a kit, a file you opened. A rename rewrites only the title in the
+  owner's own sidecar; a delete takes the sidecar first, then the audio. Archive cores can't be changed.
+
+The full contract is in Workbench's `WORKBENCH.md`.
 At `adit.wastelandprops.com` none of this happens: ADIT is the archive, as before.
+
+## Multichannel and ambisonic files
+
+A file with more than two channels gets a **Listen as** row in the deck. Every channel has a key, so you
+can solo or drop any of them; what you leave on is summed to both ears. A four-channel file can also be
+heard as first-order **AmbiX** (ACN/SN3D, the default when the name says ambix, FOA, B-format, H3-VR or
+NT-SF1) or **FuMa**: it is decoded to eight virtual speakers through the browser's HRTF, so on headphones
+each sound keeps its place. A compass appears beside the meters: you are at its centre, your front at
+the top, and the dots show where the energy came from in the last moments of the core. Drag it to turn
+your head (double-click to face front). This is how you listen, nothing more: the download, the hand-off
+and the core itself are always the recorded channels.
 
 ## Reading local files
 
@@ -125,8 +140,11 @@ picker, so use **Open files** and multi-select from Files.
 | / | jump to search |
 | K | copy a link to this moment |
 | I / O / X | mark A, mark B, clear |
-| Alt+Tab | swing between read head and rack |
+| V (or the view key) | READ → DIVE → RACK |
 | drag the core | seek by depth |
+| drag beside the core | turn it |
+| DIVE: drag up / down | travel through the core; sideways turns it |
+| RACK: tap a core | load it |
 | drag the ruler | seek by time |
 | press and hold the ruler, then drag | mark an A/B region |
 

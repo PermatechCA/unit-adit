@@ -163,6 +163,22 @@ html[data-workbench="app"] #strip{margin-left:max(0px, calc(var(--wb-mark-inset,
 #sendrow{display:flex;align-items:center;gap:calc(var(--u)*2);padding:0 var(--pad) var(--pad);flex-wrap:wrap;
   font-size:var(--tick);letter-spacing:.2em;text-transform:uppercase;color:var(--ash)}
 #sendrow[hidden]{display:none}
+/* RENAME / DELETE and LISTEN AS: same weight as SEND, 44 px targets, no sliders */
+.drow{display:flex;align-items:center;gap:calc(var(--u)*2);padding:0 var(--pad) var(--pad);flex-wrap:wrap;
+  font-size:var(--tick);letter-spacing:.2em;text-transform:uppercase;color:var(--ash)}
+.drow[hidden]{display:none}
+.act{min-height:44px;padding:0 calc(var(--u)*4);background:transparent;color:var(--bone);border:1px solid var(--rule-2);
+  font:inherit;letter-spacing:.16em;text-transform:uppercase;cursor:pointer}
+.act:hover,.act:focus-visible{border-color:var(--amber);outline:none}
+.act[aria-pressed="true"]{background:var(--bone);color:var(--ink);border-color:var(--bone)}
+.act.ch{min-width:44px;padding:0}
+.act.armed{color:var(--alarm);border-color:var(--alarm)}
+#rn{flex:1 1 180px;min-width:0;min-height:44px;font:inherit;font-size:16px;letter-spacing:.04em;text-transform:none;
+  background:var(--ink);color:var(--bone);border:1px solid var(--amber);padding:0 calc(var(--u)*3);border-radius:0}
+#space{position:fixed;z-index:4;width:148px;height:148px;touch-action:none;cursor:grab}
+#space[hidden]{display:none}
+/* inside the core the title would sit on the tunnel, so it steps back */
+body[data-view="dive"] #stamp,body[data-view="rack"] #stamp{opacity:.28}
 #sendkeys{display:flex;gap:calc(var(--u)*2);flex-wrap:wrap}
 #sendrow .snd{min-height:44px;padding:0 calc(var(--u)*4);background:transparent;color:var(--amber);border:1px solid var(--oxide);
   font:inherit;letter-spacing:.16em;cursor:pointer}
@@ -366,7 +382,7 @@ html[data-workbench="app"] #strip{margin-left:max(0px, calc(var(--wb-mark-inset,
         <button class="key" id="k-loop" type="button" title="Loop — L" aria-label="Loop" aria-pressed="false"><svg viewBox="0 0 16 16"><path d="M3 5h8V3l3 3-3 3V7H4v3H2V6a1 1 0 011-1zm10 6H5v2l-3-3 3-3v2h9v4h-2z"/></svg></button>
         <button class="key" id="k-dl" type="button" title="Download this core — D" aria-label="Download this core"><svg viewBox="0 0 16 16"><path d="M7 2h2v6h3l-4 5-4-5h3zM2 13h12v1.6H2z"/></svg></button>
         <button class="key" id="k-link" type="button" title="Copy a link to this moment — K" aria-label="Copy link to this core"><svg viewBox="0 0 16 16"><path d="M6.6 9.4a3 3 0 004.2 0l2.3-2.3a3 3 0 10-4.2-4.2L7.9 4.1l1.2 1.2 1-1a1.3 1.3 0 111.8 1.8L9.6 8.2a1.3 1.3 0 01-1.8 0zM9.4 6.6a3 3 0 00-4.2 0L2.9 8.9a3 3 0 104.2 4.2l1-1-1.2-1.2-1 1a1.3 1.3 0 11-1.8-1.8l2.3-2.3a1.3 1.3 0 011.8 0z"/></svg></button>
-        <button class="key" id="k-view" type="button" title="Swing between read head and rack — Alt+Tab" aria-label="Toggle view">◱</button>
+        <button class="key" id="k-view" type="button" title="View: READ — next DIVE (V)" aria-label="Change view: read, dive, rack" aria-pressed="false">◱</button>
       </div>
 
       <div class="clock" id="depthbox"><s>DEPTH</s> <b id="c-pos">00:00.000</b> <s>/</s> <b id="c-len">00:00.000</b> <s id="rgn"></s></div>
@@ -383,6 +399,8 @@ html[data-workbench="app"] #strip{margin-left:max(0px, calc(var(--wb-mark-inset,
       <div class="clock" id="trimbox"><s>TRIM</s> <b id="c-gain">0.0</b><s>dB</s></div>
       <input id="gain" type="range" min="-24" max="6" step="0.5" value="0" aria-label="Output trim in decibels">
     </div>
+    <div id="actrow" class="drow" hidden></div>
+    <div id="monrow" class="drow" hidden></div>
     <div id="sendrow" hidden><span>Send to</span><span id="sendkeys"></span><span id="sendnote">· the A/B region if one is marked</span></div>
   </section>
 
@@ -396,6 +414,7 @@ html[data-workbench="app"] #strip{margin-left:max(0px, calc(var(--wb-mark-inset,
 </div>
 
 <div id="label"></div>
+<canvas id="space" hidden width="148" height="148" aria-label="Listening direction — drag to turn your head, double-click to face front"></canvas>
 <div id="drop">Release to log core</div>
 <div id="boot"><b>BOOT</b> <span id="boot-msg">starting…</span><span class="err" id="boot-err"></span></div>
 

@@ -51,10 +51,12 @@ FATHOM depth · ADIT through.)
 
 ## Inside Public Workbench (`window.__workbench` present)
 
-8. **The library mode only reads other tools' files.** FIELD (`recordings/`), PS-1 (`library/`) and the
-   shelf (`shelf/<tool>/`). It writes only `shelf/adit/` (files the user opens) and `shelf/_handoff/`. Never
-   edit, rename or delete another tool's file, and never list a FIELD take whose sidecar isn't `done`
-   (it's locked while recording).
+8. **Other tools' files: read freely, change only on the user's say-so.** FIELD (`recordings/`), PS-1
+   (`library/`) and the shelf (`shelf/<tool>/`). ADIT writes `shelf/adit/` (files the user opens) and
+   `shelf/_handoff/`; beyond that only **Rename** (rewrites one title field in the owner's sidecar, read
+   fresh: FIELD `meta.title`, PS-1 `name`, shelf `title`) and **Delete** (sidecar first, then the audio;
+   PS-1's whole `library/<id>/`). Nothing else in another tool's files is ever touched, and a FIELD take
+   whose sidecar isn't `done` is never listed (it's locked while recording).
 9. **Library paths stay relative** (`../wb/build.json`, `../<tool>/?handoff`). Workbench's build refuses
    root paths.
 10. Outside Workbench nothing changes: the archive is a shelf, local files stay behind `?log`.
@@ -67,6 +69,10 @@ FATHOM depth · ADIT through.)
     booting inside Workbench; the reference build once died on a FIELD location with no `lon`.
 13. **Library text reaches the page as text.** File names, FIELD notes and other tools' tags go through
     `esc()` before any `innerHTML`. That origin holds every Workbench tool's files.
+14. **The monitor is a way of listening, never a transform.** Mix, AmbiX and FuMa change what reaches
+    the ears only. Download, hand-off and the core are always the recorded channels. Web Audio's own
+    down-mix drops channels past stereo, so a file of more than two channels always goes through the
+    monitor's splitter, never straight to the trim.
 
 ## Harnesses — run before every commit
 
@@ -94,7 +100,8 @@ Counts are for `public/index.html`.
 | `decodeAudioData` | **2** — comment + the FLAC/lossy branch only |
 | `logCore(` | **2** — definition and the call in `selectEntry` |
 | `copyToChannel` | **1** — the only route from parsed samples into an AudioBuffer |
-| `SLICES` | **19** |
+| `SLICES` | **23** |
+| `createPanner` | **2** — the feature check and the one call: the ambisonic monitor's eight virtual speakers. Nothing else is spatialised |
 | `ShaderMaterial` | **3** — bright, blur, composite. Nothing else may be one. |
 | `SpotLight` | **0** — see doctrine 2 |
 | `MeshStandardMaterial` | **0** — see doctrine 2 |
