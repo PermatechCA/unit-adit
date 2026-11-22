@@ -94,6 +94,11 @@ corner-mark script sets `window.__workbench`; when it's there, ADIT:
 - offers **Send to** for each tool that takes sound: the core on the head, or its A/B region, always as
   32-bit float WAV. An archive core sends its float master, the same file its download gives.
 
+- lists a **FATHOM kit** as one entry (its name and how many sounds) that opens to show its sounds in
+  pad order. Open, it offers **Send kit to** (only tools whose build.json `takes` includes `"kit"`; a
+  kit of more than 16 sends the first 16 and says so on the button) and **Delete kit**;
+- tells the receiving tool what it is sending: `kind: "sound"`, `"waves"` for a LATHE table (sent byte
+  for byte, whole, so its `clm ` frame-size chunk survives), or a v2 `"kit"` note;
 - **renames and deletes** anything in the library from the deck (Rename · Delete, two taps to delete):
   a FIELD take, a PS-1 loop, a stem, a kit, a file you opened. A rename rewrites only the title in the
   owner's own sidecar; a delete takes the sidecar first, then the audio. Archive cores can't be changed.

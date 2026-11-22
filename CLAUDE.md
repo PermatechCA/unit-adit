@@ -75,6 +75,11 @@ FATHOM depth · ADIT through.)
     so what goes on is what was heard), kept as a new sound tagged HEARD; never written over the source. Web Audio's own
     down-mix drops channels past stereo, so a file of more than two channels always goes through the
     monitor's splitter, never straight to the trim.
+15. **Hand-offs say what they carry.** A single sound's note has `kind: "sound"`, or `"waves"` for a LATHE
+    table. A wavetable is copied byte for byte, whole, never re-encoded: its `clm ` chunk holds the frame
+    size. A kit is a v2 note (`kind: "kit"`, `items` in slot order, at most 16), and every item's file is
+    written before the note. A tool gets a kit only if its build.json `takes` includes `"kit"`. Shared test
+    environment: `test/env.mjs`.
 
 ## Harnesses — run before every commit
 
@@ -83,6 +88,7 @@ node build/make.mjs     # public/index.html is generated; rebuild first
 node test/boot.js       # evaluates the built file against stubbed GL/Audio/DOM
 node test/decode.js
 node test/manifest.js
+node test/library.js    # library mode against a fake OPFS + localStorage: kits, kit hand-off (v2), kinds, wavetables
 ```
 
 `boot.js` catches the fault class a syntax check cannot: a deleted function, an
@@ -96,7 +102,7 @@ Counts are for `public/index.html`.
 | grep | expected |
 |---|---|
 | `createOscillator` | **0** — doctrine 1 |
-| `localStorage` | **2** — the Workbench hand-off note: one `setItem`, one comment. Library mode only; blocked in the artifact sandbox, where library mode never runs |
+| `localStorage` | **4** — the Workbench hand-off note: three `setItem` (a sound, a wavetable, a kit) and one comment. Library mode only; blocked in the artifact sandbox, where library mode never runs |
 | `parseWav` | **3** — definition, the call in `decode()`, and the hand-off reading a float master (rule 11) |
 | `workbench-accepts` | **0** — Workbench's build would read it as ADIT accepting sound, comments included |
 | `decodeAudioData` | **2** — comment + the FLAC/lossy branch only |

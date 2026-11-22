@@ -610,6 +610,7 @@ async function decode(buf, name){
 
 /* ═══ STATE ══════════════════════════════════════════════════════════════ */
 const S = {
+  openKits: new Set(),
   entries: [], current: -1, seam: 'ALL', query: '', collection: '—',
   hover: -1, view: 'read', busy: false,
   mode: 'off',          // off → one (loop) → chain (auto-advance)
@@ -1263,20 +1264,44 @@ const UI = {
         <span class="d"></span><span></span></div>`;
       return;
     }
-    el.rows.innerHTML = list.map(({e,i}) => {
+    const row = ({e,i}) => {
       const mx = masterExtOf(e);
       const meta = [(e.tags||[]).join(' · ') || (e.local ? 'LOCAL' : 'CACHE'),
                     e.badge || extOf(e),
                     e.size ? bytes(e.size) : null,
                     mx ? '↓ ' + mx : null].filter(Boolean).join('  ·  ');
-      return `<div class="row${e.failed?' bad':''}" role="option" tabindex="0" data-i="${i}"
+      return `<div class="row${e.failed?' bad':''}${e.kit?' inkit':''}" role="option" tabindex="0" data-i="${i}"
             aria-current="${i===S.current}" aria-selected="${i===S.current}">
          <span class="n">${pad(i+1,3)}</span>
          <span class="c"><span class="t">${esc(e.title)}</span><span class="tag">${esc(meta)}</span></span>
          <span class="d">${e.dur ? clock(e.dur).slice(0,5) : (e.failed ? 'ERR' : '––:––')}</span>
          <button class="dl" type="button" data-dl="${i}" title="Download ${esc(dlNameOf(e))}"
                  aria-label="Download ${esc(e.title)}">↓</button>
-       </div>`; }).join('');
+       </div>`; };
+    /* a kit is one entry; open, it shows its bar (send, delete) and then its sounds in slot order */
+    const kitRow = key => {
+      const all = kitOf(key), k = all[0].kit, open = S.openKits.has(key) || !!q, n = all.length;
+      const over = n > KIT_MAX ? ' · first ' + KIT_MAX + ' of ' + n : '';
+      const bar = !open ? '' : `<div class="kitbar">` +
+        (KIT_TAKERS.length ? '<span>Send kit to</span>' + KIT_TAKERS.map(t =>
+          `<button class="act" type="button" data-kitsend="${esc(t.id)}" data-kitof="${esc(key)}">${esc(t.name)}${over}</button>`).join('') : '') +
+        `<button class="act" type="button" data-kitdel="${esc(key)}">Delete kit</button></div>`;
+      return `<div class="row kit" role="option" tabindex="0" data-kit="${esc(key)}" aria-expanded="${open}">
+         <span class="n">${open ? '▾' : '▸'}</span>
+         <span class="c"><span class="t">${esc(k.name.toUpperCase())}</span><span class="tag">KIT · ${n} SOUND${n === 1 ? '' : 'S'} · ${esc(String(k.tool).toUpperCase())}</span></span>
+         <span class="d"></span><span></span>
+       </div>` + bar;
+    };
+    const seen = new Set(), out = [];
+    for (const it of list){
+      const k = it.e.kit && it.e.kit.key;
+      if (k){
+        if (!seen.has(k)){ seen.add(k); out.push(kitRow(k)); }
+        if (!(S.openKits.has(k) || q)) continue;
+      }
+      out.push(row(it));
+    }
+    el.rows.innerHTML = out.join('');
   },
 
   region(){
@@ -1818,11 +1843,19 @@ el.gain.addEventListener('input', () => {
   setTrim(v);
 });
 el.rows.addEventListener('click', ev => {
+  const ks = ev.target.closest('[data-kitsend]');
+  if (ks){ ev.stopPropagation(); sendKit(ks.dataset.kitof, KIT_TAKERS.find(t => t.id === ks.dataset.kitsend)); return; }
+  const kd = ev.target.closest('[data-kitdel]');
+  if (kd){ ev.stopPropagation(); deleteKit(kd); return; }
+  const kh = ev.target.closest('[data-kit]');
+  if (kh){ const k = kh.dataset.kit; S.openKits.has(k) ? S.openKits.delete(k) : S.openKits.add(k); UI.rows(); return; }
   const d = ev.target.closest('.dl');
   if (d){ ev.stopPropagation(); download(+d.dataset.dl); return; }
   const r = ev.target.closest('.row'); if (r && r.dataset.i) selectEntry(+r.dataset.i);
 });
 el.rows.addEventListener('keydown', ev => {
+  const kh = ev.target.closest('[data-kit]');
+  if (kh && (ev.key === 'Enter' || ev.key === ' ')){ ev.preventDefault(); kh.click(); return; }
   const r = ev.target.closest('.row');
   if (r && r.dataset.i && (ev.key === 'Enter' || ev.key === ' ')){ ev.preventDefault(); selectEntry(+r.dataset.i); }
 });
@@ -2171,6 +2204,8 @@ const Library = (() => {
               id: 'SHELF-' + tool + '-' + id, local: true, source: {tool, id},
               title: up(j.title || j.file, 80), handle: {dir: d, name: base(j.file)}, dlName: base(j.file),
               src: {kind: 'shelf', dir: d, json: name, audio: base(j.file)}, given: j.title || undefined,
+              kit: j.kit && j.kit.id != null ? {key: tool + ':' + j.kit.id, id: String(j.kit.id),
+                   name: String(j.kit.name || 'Kit'), slot: Number(j.kit.slot) || 0, tool} : undefined,
               size: j.bytes, dur: j.durationSec, made, date: made ? day(made) : undefined,
               cat: catOfShelf(j, tool),
               tags: ['YOURS', up(tool === OWN ? (j.from ? 'KEPT' : 'OPENED') : tool)].concat((Array.isArray(j.tags) ? j.tags : []).map(t => up(t))),
@@ -2247,8 +2282,22 @@ const Library = (() => {
   /* Hand a sound to another tool: write it to shelf/_handoff/ as 32-bit float WAV (the A/B region only, if
      one is marked), leave a note in localStorage, open the tool. The tool reads the note (WORKBENCH.md,
      "Handing a sound on"). Old hand-offs are cleared on load. */
+  const isWaves = e => !!(e.source && e.source.tool === 'lathe' && e.handle);
   async function handoff(to, e, region, heard){
     const r = await opfs(); if (!r) throw new Error('this browser has no file store');
+    /* A LATHE wavetable is copied byte for byte: its WAV carries a 'clm ' chunk with the frame size, which
+       a re-encode would drop, and the receiver needs it to make the pad a synth. Always the whole file. */
+    if (!heard && isWaves(e)){
+      const data = await (await fileOf(e)).arrayBuffer();
+      const d = await sub(await sub(r, SHELF, true), HANDOFF, true);
+      if (!d) throw new Error('could not open the shelf');
+      const name = base(e.handle.name), file = Date.now().toString(36) + '-' + name;
+      await write(d, file, data);
+      const note = {v: 1, kind: 'waves', to, file: SHELF + '/' + HANDOFF + '/' + file, name, title: e.title,
+                    from: {tool: 'adit', source: e.source}, region: null, bytes: data.byteLength, at: Date.now()};
+      localStorage.setItem('wb.handoff', JSON.stringify(note));
+      return note;
+    }
     const {chans, rate} = heard || await samplesOf(e);              // a render arrives already cut to A/B
     let cut = chans, name = slug(e.title).toLowerCase() + (heard ? '-heard' : '');
     if (region){
@@ -2263,10 +2312,32 @@ const Library = (() => {
     if (!d) throw new Error('could not open the shelf');
     const file = Date.now().toString(36) + '-' + name;
     await write(d, file, data);
-    const note = {v: 1, to, file: SHELF + '/' + HANDOFF + '/' + file, name, title: heard ? e.title + ' — HEARD' : e.title,
+    const note = {v: 1, kind: 'sound', to, file: SHELF + '/' + HANDOFF + '/' + file, name, title: heard ? e.title + ' — HEARD' : e.title,
                   from: {tool: 'adit', source: e.source || (e.id ? {tool: 'archive', id: e.id} : null)},
                   region: region || null, bytes: data.byteLength, at: Date.now()};
     localStorage.setItem('wb.handoff', JSON.stringify(note));
+    return note;
+  }
+  /* A kit: every member written into shelf/_handoff/ first, as float WAV, then one note (v2) naming them
+     in slot order (WORKBENCH.md, "Handing on more than one sound: kits"). */
+  async function handoffKit(to, title, members, progress){
+    const r = await opfs(); if (!r) throw new Error('this browser has no file store');
+    const d = await sub(await sub(r, SHELF, true), HANDOFF, true);
+    if (!d) throw new Error('could not open the shelf');
+    const stamp = Date.now().toString(36), items = [];
+    for (let k = 0; k < members.length; k++){
+      const e = members[k];
+      if (progress) progress(k, members.length);
+      const {chans, rate} = await samplesOf(e);
+      const data = wavFloat(chans, rate);
+      const name = String(k + 1).padStart(2, '0') + '-' + slug(e.given || e.title).toLowerCase() + '.wav';
+      const file = stamp + '-' + name;
+      await write(d, file, data);
+      items.push({file: SHELF + '/' + HANDOFF + '/' + file, name, title: e.title, bytes: data.byteLength,
+                  region: null, from: e.source ? {tool: e.source.tool, id: e.source.id} : {tool: 'archive', id: e.id}});
+    }
+    const note = {v: 2, kind: 'kit', to, title, at: Date.now(), from: {tool: 'adit'}, items};
+    localStorage.setItem('wb.handoff', JSON.stringify(note));         // only once every file is down
     return note;
   }
   async function sweep(){
@@ -2285,16 +2356,22 @@ const Library = (() => {
 
   /* Which tools take a sound handed to them: Workbench's build reads each tool's accepts-audio meta tag
      (WORKBENCH.md, "Handing a sound on") into wb/build.json. */
-  let takers = null;
-  async function accepting(){
-    if (takers) return takers;
+  let tools = null;
+  async function toolList(){
+    if (tools) return tools;
     try { const b = await (await fetch('../wb/build.json', {cache: 'no-store'})).json();
-          takers = (Array.isArray(b.tools) ? b.tools : [])
-            .filter(t => t && t.accepts === true && t.id && t.id !== OWN)
-            .map(t => ({id: String(t.id), name: String(t.name || t.id).toUpperCase()})); }
-    catch(_){ takers = []; }
-    return takers;
+          tools = (Array.isArray(b.tools) ? b.tools : [])
+            .filter(t => t && t.id && t.id !== OWN)
+            .map(t => {
+              const takes = Array.isArray(t.takes) ? t.takes.map(String) : [];
+              if (t.accepts === true && !takes.includes('audio')) takes.push('audio');
+              return {id: String(t.id), name: String(t.name || t.id).toUpperCase(), takes};
+            }); }
+    catch(_){ tools = []; }
+    return tools;
   }
+  /* "audio" for a single sound, "kit" for a whole kit: only tools whose build.json "takes" says so */
+  async function accepting(kind = 'audio'){ return (await toolList()).filter(t => t.takes.includes(kind)); }
 
   /* Rename and delete reach every tool's sound (WORKBENCH.md, "Rename and delete"). A rename rewrites
      one field of the owner's own sidecar, read fresh so nothing else in it is lost: FIELD meta.title,
@@ -2321,7 +2398,7 @@ const Library = (() => {
     await s.dir.removeEntry(s.audio).catch(() => {});
   }
 
-  return {scan, fileOf, keep, handoff, sweep, accepting, rename, remove, samplesOf};
+  return {scan, fileOf, keep, handoff, handoffKit, sweep, accepting, rename, remove, samplesOf, isWaves};
 })();
 
 /* A 32-bit float WAV, exactly the samples given: nothing clamped, nothing dithered. */
@@ -2351,19 +2428,72 @@ async function sendTo(tool){
   const e = S.entries[S.current];
   if (!e || !A.buffer){ el.hint.textContent = 'Pick a core to send'; return; }
   if (S.busy){ el.hint.textContent = 'Still logging · send it once the core is read'; return; }
-  const region = (S.rgnA != null && S.rgnB > S.rgnA) ? [S.rgnA, S.rgnB] : null;
+  const waves = Library.isWaves(e);
+  const region = !waves && S.rgnA != null && S.rgnB > S.rgnA ? [S.rgnA, S.rgnB] : null;
   el.hint.textContent = (e.masterUrl ? 'Pulling the float master · ' : '')
-    + 'Handing ' + (region ? 'A/B of ' : '') + e.title + ' to ' + tool.name;
+    + 'Handing ' + (waves ? 'the wavetable ' : region ? 'A/B of ' : '') + e.title + ' to ' + tool.name;
   sending = true;
   try {
     // B-format goes on as what you hear at the receiver: that is what the position is for
     const heard = ambiOn() ? await renderHeard(e, region) : null;
     await Library.handoff(tool.id, e, region, heard);
     location.href = '../' + encodeURIComponent(tool.id) + '/?handoff';   // a sibling folder: ADIT is at /adit/ in Workbench
+    setTimeout(() => { sending = false; }, 3000);   // still here? the navigation was refused: let a retry through
   } catch (err){
     sending = false;
     el.hint.textContent = 'Could not hand it on — ' + (err.message || err);
   }
+}
+
+/* KITS: the sounds of one FATHOM kit share a kit id. They list as one entry that opens to its sounds
+   in slot order; from there the whole kit can be sent, or deleted, in one go. */
+const KIT_MAX = 16;                                   // one kit fills one bank: sixteen pads
+let KIT_TAKERS = [];
+const kitOf = key => S.entries.filter(e => e.kit && e.kit.key === key).sort((a, b) => a.kit.slot - b.kit.slot);
+/* members of a kit sit together, in slot order, where the newest of them would have been */
+function groupKits(list){
+  const out = [], seen = new Map();
+  for (const e of list){
+    if (!e.kit){ out.push(e); continue; }
+    let g = seen.get(e.kit.key);
+    if (!g){ g = []; seen.set(e.kit.key, g); out.push(g); }
+    g.push(e);
+  }
+  return out.flatMap(x => Array.isArray(x) ? x.sort((a, b) => a.kit.slot - b.kit.slot) : [x]);
+}
+async function sendKit(key, tool){
+  if (!tool || sending) return;
+  const all = kitOf(key); if (!all.length) return;
+  const items = all.slice(0, KIT_MAX), name = all[0].kit.name;
+  sending = true;
+  try {
+    await Library.handoffKit(tool.id, name, items,
+      (k, n) => { el.hint.textContent = 'Handing ' + name + ' to ' + tool.name + ' · ' + (k + 1) + ' of ' + n
+                  + (all.length > KIT_MAX ? ' (the first ' + KIT_MAX + ' of ' + all.length + ')' : ''); });
+    location.href = '../' + encodeURIComponent(tool.id) + '/?handoff';
+    setTimeout(() => { sending = false; }, 3000);
+  } catch (err){
+    sending = false;
+    el.hint.textContent = 'Could not hand the kit on — ' + (err.message || err);
+  }
+}
+let kitArm = null;
+async function deleteKit(btn){
+  const key = btn.dataset.kitdel, all = kitOf(key);
+  if (!all.length) return;
+  if (!btn.classList.contains('armed')){             // two taps, as for one sound
+    btn.classList.add('armed'); btn.textContent = 'Tap again to delete ' + all.length + ' sounds';
+    clearTimeout(kitArm); kitArm = setTimeout(() => UI.rows(), 5000);
+    return;
+  }
+  clearTimeout(kitArm);
+  const name = all[0].kit.name;
+  try {
+    for (const e of all) if (e.src) await Library.remove(e);   // each: sidecar first, then audio
+    for (const e of all){ const i = S.entries.indexOf(e); if (i >= 0) dropEntry(i); }
+    S.openKits.delete(key); UI.rows();
+    el.hint.textContent = 'Deleted ' + name + ' · ' + all.length + ' sounds';
+  } catch (err){ el.hint.textContent = 'Could not delete the kit — ' + (err.message || err); UI.rows(); }
 }
 
 /* ═══ MANIFEST ═══════════════════════════════════════════════════════════ */
@@ -2389,7 +2519,8 @@ async function loadManifest(){
   if (LIB){
     Library.sweep();
     const mine = await Library.scan();
-    S.entries = mine.concat(S.entries);
+    S.entries = groupKits(mine).concat(S.entries);
+    KIT_TAKERS = await Library.accepting('kit');
     S.collection = 'YOUR LIBRARY';
     const k = document.querySelector('#stamp .k'); if (k) k.textContent = 'Public Workbench — Library';
     const lab = el.coll.previousElementSibling; if (lab) lab.textContent = 'LIBRARY';
@@ -2509,7 +2640,7 @@ function tick(now){
   requestAnimationFrame(frame);
   requestAnimationFrame(() => { resize(); camPos.copy(wantPos); camAim.copy(wantAim); });
   window.__adit.ready = true;
-  if (LIB) window.__adit.library = {S, Library, sendTo, MON, meters, setMonitor, renderHeard};   // for end-to-end tests
+  if (LIB) window.__adit.library = {S, Library, sendTo, sendKit, kitOf, MON, meters, setMonitor, renderHeard};   // for end-to-end tests
   boot('ready');
   setTimeout(() => $('#boot').classList.add('done'), 900);
 })();

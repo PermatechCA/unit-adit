@@ -176,6 +176,14 @@ html[data-workbench="app"] #strip{margin-left:max(0px, calc(var(--wb-mark-inset,
 #rn{flex:1 1 180px;min-width:0;min-height:44px;font:inherit;font-size:16px;letter-spacing:.04em;text-transform:none;
   background:var(--ink);color:var(--bone);border:1px solid var(--amber);padding:0 calc(var(--u)*3);border-radius:0}
 /* one tools row: THIS SOUND, LISTEN AS and SEND TO sit side by side and wrap only when they must */
+/* a kit in the log: one row, then its bar and its sounds, set in a step */
+#rows .row.kit .n{color:var(--amber)}
+#rows .row.inkit{padding-left:calc(var(--u)*5);border-left:1px solid var(--rule-2)}
+.kitbar{display:flex;flex-wrap:wrap;align-items:center;gap:calc(var(--u)*1.5);padding:0 var(--pad) var(--pad) calc(var(--u)*5);
+  font-size:var(--tick);letter-spacing:.2em;text-transform:uppercase;color:var(--ash)}
+.kitbar .act{min-height:34px;padding:0 calc(var(--u)*3)}
+.kitbar .act[data-kitsend]{color:var(--amber);border-color:var(--oxide)}
+@media (pointer:coarse){.kitbar .act{min-height:44px}}
 #tools{display:flex;flex-wrap:wrap;align-items:center;gap:calc(var(--u)*2) calc(var(--u)*7);padding:0 var(--pad) var(--pad)}
 #tools:not(:has(> :not([hidden]))){display:none}
 #tools .drow,#tools #sendrow{padding:0;gap:calc(var(--u)*1.5);flex-wrap:nowrap}
