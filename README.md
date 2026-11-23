@@ -102,6 +102,9 @@ corner-mark script sets `window.__workbench`; when it's there, ADIT:
 - **renames and deletes** anything in the library from the deck (Rename · Delete, two taps to delete):
   a FIELD take, a PS-1 loop, a stem, a kit, a file you opened. A rename rewrites only the title in the
   owner's own sidecar; a delete takes the sidecar first, then the audio. Archive cores can't be changed.
+- is **every tool's "Your library"** on Open: Workbench opens `/adit/?pick=<tool>` in a sheet, a compact
+  list with **Use** and **Cancel** (Esc). Use hands the sound back to the tool as stored (a wavetable byte
+  for byte), or just the A/B region, as 32-bit float, if one is marked on the sound you're previewing.
 
 The full contract is in Workbench's `WORKBENCH.md`.
 At `adit.wastelandprops.com` none of this happens: ADIT is the archive, as before.

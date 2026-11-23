@@ -332,6 +332,30 @@ body[data-view="dive"] #stamp,body[data-view="rack"] #stamp,body[data-view="spac
 /* no hover on touch, so a row's download has to be there without one */
 @media (hover:none){ .row .dl{opacity:1} }
 
+/* ─── PICK (?pick=<tool>): a compact chooser in Workbench's sheet ─────────── */
+body[data-pick] canvas,body[data-pick] .reg,body[data-pick] #stamp,body[data-pick] #label,
+body[data-pick] #strip,body[data-pick] #tabs,body[data-pick] #meter,body[data-pick] .void,
+body[data-pick] #tools,body[data-pick] #btn-local,
+body[data-pick] #k-dl,body[data-pick] #k-link,body[data-pick] #k-view{display:none!important}
+body[data-pick]{background:var(--ink)}
+body[data-pick] #hud{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;
+  grid-template-areas:"pick" "index" "deck"}
+body[data-pick] #index{grid-area:index;display:flex!important;max-height:none}
+#pickbar{grid-area:pick;display:flex;align-items:center;gap:calc(var(--u)*3);
+  border-bottom:1px solid var(--rule);padding-bottom:calc(var(--u)*2)}
+#pickbar[hidden]{display:none}
+#pickbar b{flex:1;min-width:0;font-weight:400;letter-spacing:.14em;text-transform:uppercase;color:var(--bone);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pk-cancel{min-height:44px;min-width:88px;padding:0 calc(var(--u)*4);background:none;color:var(--bone);
+  border:1px solid var(--rule-2);font:inherit;letter-spacing:.14em;text-transform:uppercase;cursor:pointer}
+#pk-cancel:hover{border-color:var(--bone)}
+body[data-pick] .row{grid-template-columns:40px minmax(0,1fr) auto auto}
+.row .use{min-height:36px;padding:0 calc(var(--u)*3);background:none;color:var(--amber);
+  border:1px solid var(--amber);font:inherit;letter-spacing:.14em;text-transform:uppercase;cursor:pointer}
+.row .use:hover{background:var(--amber);color:var(--ink)}
+.row .use:disabled{opacity:.5;cursor:default}
+@media (pointer:coarse){.row .use{min-height:44px;min-width:64px}}
+
 @media (prefers-reduced-motion:reduce){.blink{animation:none}*{transition-duration:.01ms!important}}
 </style>
 </head>
@@ -339,6 +363,7 @@ body[data-view="dive"] #stamp,body[data-view="rack"] #stamp,body[data-view="spac
 <div class="reg tl"></div><div class="reg tr"></div><div class="reg bl"></div><div class="reg br"></div>
 
 <div id="hud">
+  <div id="pickbar" hidden><b id="pk-title">Choose a sound</b><button id="pk-cancel" type="button">Cancel</button></div>
 
   <div id="strip" role="status" aria-live="polite">
     <div class="cell mark">UNIT·ADIT</div>

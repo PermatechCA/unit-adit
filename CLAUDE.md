@@ -80,6 +80,11 @@ FATHOM depth · ADIT through.)
     size. A kit is a v2 note (`kind: "kit"`, `items` in slot order, at most 16), and every item's file is
     written before the note. A tool gets a kit only if its build.json `takes` includes `"kit"`. Shared test
     environment: `test/env.mjs`.
+16. **A picker only chooses.** `?pick=<tool>` (Workbench's sheet over a tool's Open) shows the list, search,
+    filters and preview, with Use and Cancel, and nothing else: no 3D render, no rename or delete, no Send
+    to, no Open files. Use posts `wb-pick` to `parent`, to `location.origin` only, with the bytes as stored
+    and transferred (a wavetable whole, byte for byte; a marked A/B as a 32-bit float WAV). While framed
+    ADIT writes nothing app-wide: no files, no localStorage, no URL hash, no hand-off sweep.
 
 ## Harnesses — run before every commit
 
@@ -88,6 +93,7 @@ node build/make.mjs     # public/index.html is generated; rebuild first
 node test/boot.js       # evaluates the built file against stubbed GL/Audio/DOM
 node test/decode.js
 node test/manifest.js
+node test/pick.js       # ?pick=<tool> in Workbench's sheet: Use (bytes as stored, waves, A/B), Cancel, origin, nothing written
 node test/library.js    # library mode against a fake OPFS + localStorage: kits, kit hand-off (v2), kinds, wavetables
 ```
 

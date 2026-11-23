@@ -624,8 +624,15 @@ const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':
    Inside Public Workbench (window.__workbench, set by Workbench's corner-mark script) ADIT is the
    library instead: it reads what the other tools have kept on this device, keeps files you open, and
    hands a sound on to another tool. The archive is still there, as one shelf among the others. */
-const LIB = !!(window.__workbench);
-const LOG_MODE = new URLSearchParams(location.search).has('log') || LIB;
+/* Pick mode (?pick=<tool>): Workbench opens ADIT in a sheet over a tool's Open, and ADIT hands one sound
+   back to the parent window (WORKBENCH.md, "Choosing from the library inside a tool"). Only the list,
+   search, filters and preview play; nothing app-wide changes while framed. &kind=audio is everything
+   that is audio, the default, and a kind ADIT doesn't know is ignored. */
+const QS = new URLSearchParams(location.search);
+const PICK = String(QS.get('pick') || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32);
+const FRAMED = !!PICK || !!(window.__workbench && window.__workbench.framed);
+const LIB = !!(window.__workbench) || !!PICK;
+const LOG_MODE = (QS.has('log') || LIB) && !PICK;
 
 const nameFrom = (u, fallback) => {
   try { return decodeURIComponent(new URL(u, location.href).pathname.split('/').pop()) || fallback; }
@@ -1279,14 +1286,15 @@ const UI = {
          <span class="n">${pad(i+1,3)}</span>
          <span class="c"><span class="t">${esc(e.title)}</span><span class="tag">${esc(meta)}</span></span>
          <span class="d">${e.dur ? clock(e.dur).slice(0,5) : (e.failed ? 'ERR' : '––:––')}</span>
-         <button class="dl" type="button" data-dl="${i}" title="Download ${esc(dlNameOf(e))}"
-                 aria-label="Download ${esc(e.title)}">↓</button>
+         ${PICK ? `<button class="use" type="button" data-use="${i}" aria-label="Use ${esc(e.title)}">Use</button>`
+                : `<button class="dl" type="button" data-dl="${i}" title="Download ${esc(dlNameOf(e))}"
+                 aria-label="Download ${esc(e.title)}">↓</button>`}
        </div>`; };
     /* a kit is one entry; open, it shows its bar (send, delete) and then its sounds in slot order */
     const kitRow = key => {
       const all = kitOf(key), k = all[0].kit, open = S.openKits.has(key) || !!q, n = all.length;
       const over = n > KIT_MAX ? ' · first ' + KIT_MAX + ' of ' + n : '';
-      const bar = !open ? '' : `<div class="kitbar">` +
+      const bar = !open || PICK ? '' : `<div class="kitbar">` +
         (KIT_TAKERS.length ? '<span>Send kit to</span>' + KIT_TAKERS.map(t =>
           `<button class="act" type="button" data-kitsend="${esc(t.id)}" data-kitof="${esc(key)}">${esc(t.name)}${over}</button>`).join('') : '') +
         `<button class="act" type="button" data-kitdel="${esc(key)}">Delete kit</button></div>`;
@@ -1378,7 +1386,7 @@ const UI = {
      keeping a new sound from this one: the marked A/B, and what you hear at the receiver. */
   actions(){
     const e = S.entries[S.current];
-    const has = !!(LIB && e && A.buffer && !S.busy);
+    const has = !!(LIB && !PICK && e && A.buffer && !S.busy);   // a picker only chooses
     const rgn = S.rgnA != null && S.rgnB > S.rgnA;
     const keys = [];
     if (has && e.local) keys.push(['rename', 'Rename'], ['delete', 'Delete']);
@@ -1498,7 +1506,7 @@ async function selectEntry(i, opt = {}){
   stop();
   S.current = i; S.busy = true; e.touched = performance.now();
   clearRegion(); UI.actions();
-  if (!e.local) history.replaceState(null, '', hashFor(e, i, false));
+  if (!e.local && !FRAMED) history.replaceState(null, '', hashFor(e, i, false));
   UI.rows(); UI.transport(); UI.stamp(e);
   el.state.textContent = 'LOGGING';
   el.hint.textContent = 'Reading ' + e.title;
@@ -1614,6 +1622,61 @@ addEventListener('hashchange', () => {
   if (!e || (h.get('c') !== (e.id || String(S.current)))) applyHash();
 });
 
+/* The file as stored: the kept file itself, a PS-1 loop as float WAV, an archive core's float master. */
+async function storedBlob(e){
+  if (e.file) return e.file;
+  if (e.handle) return Library.fileOf(e);
+  if (e.make) return new Blob([await e.make()], {type: 'audio/wav'});
+  const r = await fetch(srcOf(e), {mode: 'cors'});
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const blob = await r.blob();
+  if (!e.masterUrl) e.size = blob.size;
+  return blob;
+}
+const MIME = {wav: 'audio/wav', flac: 'audio/flac', mp3: 'audio/mpeg', ogg: 'audio/ogg', opus: 'audio/ogg',
+              m4a: 'audio/mp4', aif: 'audio/aiff', aiff: 'audio/aiff', w64: 'audio/x-w64'};
+
+/* Use: post the sound to the tool that opened the sheet, same origin only, bytes transferred.
+   An A/B region on the sound being previewed goes as just that region, 32-bit float. A wavetable always
+   goes whole and byte for byte (its 'clm ' chunk gives the frame size). */
+let picking = false;
+async function pickUse(i, btn){
+  const e = S.entries[i];
+  if (!e || picking) return;
+  picking = true;
+  if (btn){ btn.textContent = '·'; btn.disabled = true; }
+  el.hint.textContent = 'Getting ' + e.title;
+  try {
+    const waves = Library.isWaves(e);
+    const rgn = !waves && i === S.current && S.rgnA != null && S.rgnB > S.rgnA ? [S.rgnA, S.rgnB] : null;
+    let bytes, name = dlNameOf(e), mime;
+    if (rgn){
+      const {chans, rate} = await Library.samplesOf(e);
+      const a = Math.max(0, Math.floor(rgn[0] * rate)), b = Math.ceil(rgn[1] * rate);
+      const cut = chans.map(c => c.subarray(a, b));
+      if (!cut.length || !cut[0].length) throw new Error('nothing in that region');
+      bytes = wavFloat(cut, rate);
+      name = name.replace(/\.[^.]+$/, '') + '-' + rgn[0].toFixed(2) + '-' + rgn[1].toFixed(2) + '.wav';
+      mime = 'audio/wav';
+    } else {
+      const blob = await storedBlob(e);
+      bytes = await blob.arrayBuffer();
+      const ext = (/\.([a-z0-9]{2,5})$/i.exec(name) || [, sniff(bytes) || 'wav'])[1].toLowerCase();
+      if (!/\.[a-z0-9]{2,5}$/i.test(name)) name += '.' + ext;
+      mime = MIME[ext] || blob.type || 'application/octet-stream';
+    }
+    const from = e.source ? {tool: e.source.tool, id: e.source.id} : {tool: 'archive', id: e.id || null};
+    parent.postMessage({type: 'wb-pick', bytes, name, mime, title: e.title, kind: waves ? 'waves' : 'sound', from},
+                       location.origin, [bytes]);
+    el.hint.textContent = 'Sent ' + e.title;
+  } catch (err){
+    el.hint.textContent = 'Could not use it — ' + (err.message || err);
+    if (btn){ btn.textContent = 'Use'; btn.disabled = false; }
+  }
+  picking = false;
+}
+function pickCancel(){ stop(); parent.postMessage({type: 'wb-pick-cancel'}, location.origin); }
+
 async function download(i){
   const e = S.entries[i];
   if (!e) return;
@@ -1622,16 +1685,7 @@ async function download(i){
   if (btn){ btn.textContent = '·'; btn.disabled = true; }
   el.hint.textContent = 'Pulling ' + name;
   try {
-    let blob;
-    if (e.file) blob = e.file;
-    else if (e.handle) blob = await Library.fileOf(e);
-    else if (e.make) blob = new Blob([await e.make()], {type:'audio/wav'});
-    else {
-      const r = await fetch(srcOf(e), {mode:'cors'});
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      blob = await r.blob();
-      if (!e.masterUrl) e.size = blob.size;
-    }
+    const blob = await storedBlob(e);
     const a = document.createElement('a');
     const href = URL.createObjectURL(blob);
     a.href = href; a.download = name; a.style.display = 'none';
@@ -1853,6 +1907,8 @@ el.rows.addEventListener('click', ev => {
   if (kd){ ev.stopPropagation(); deleteKit(kd); return; }
   const kh = ev.target.closest('[data-kit]');
   if (kh){ const k = kh.dataset.kit; S.openKits.has(k) ? S.openKits.delete(k) : S.openKits.add(k); UI.rows(); return; }
+  const u = ev.target.closest('[data-use]');
+  if (u){ ev.stopPropagation(); pickUse(+u.dataset.use, u); return; }
   const d = ev.target.closest('.dl');
   if (d){ ev.stopPropagation(); download(+d.dataset.dl); return; }
   const r = ev.target.closest('.row'); if (r && r.dataset.i) selectEntry(+r.dataset.i);
@@ -1995,7 +2051,9 @@ el.filter.addEventListener('click', ev => {
 });
 
 addEventListener('keydown', ev => {
+  if (PICK && ev.key === 'Escape'){ ev.preventDefault(); pickCancel(); return; }
   if (ev.target.matches('input,select,textarea')) return;
+  if (PICK && /^[dDkKvV]$/.test(ev.key)) return;                 // no download, link or 3D view in a picker
   switch (ev.key){
     case ' ': ev.preventDefault(); A.playing ? pause() : play(); break;
     case 'ArrowLeft':  if (A.buffer){ ev.preventDefault(); seek(position()-5); } break;
@@ -2521,7 +2579,7 @@ async function loadManifest(){
     el.hint.textContent = 'archive.json not found';
   }
   if (LIB){
-    Library.sweep();
+    if (!FRAMED) Library.sweep();                               // nothing app-wide from inside a sheet
     const mine = await Library.scan();
     S.entries = groupKits(mine).concat(S.entries);
     KIT_TAKERS = await Library.accepting('kit');
@@ -2531,12 +2589,17 @@ async function loadManifest(){
     libCount();
     const takers = await Library.accepting();
     el.send.innerHTML = takers.map(t => `<button class="snd" type="button" data-to="${esc(t.id)}" disabled>${esc(t.name)}</button>`).join('');
-    el.sendrow.hidden = !takers.length;
+    el.sendrow.hidden = !takers.length || !!PICK;
     el.send.onclick = ev => { const b = ev.target.closest('[data-to]'); if (b) sendTo(takers.find(t => t.id === b.dataset.to)); };
+    if (PICK){
+      const t = (await Library.accepting()).find(t => t.id === PICK);
+      $('#pk-title').textContent = 'Choose a sound for ' + (t ? t.name : PICK.toUpperCase());
+    }
   }
   layoutRack(S.entries.length);
   UI.filters(); UI.rows(); UI.stamp(null);
-  el.hint.textContent = LIB
+  el.hint.textContent = PICK ? 'Tap a sound to hear it · Use sends it'
+    : LIB
     ? (S.entries.some(e => e.local) ? 'Your recordings, loops and kept files, then the archive' : 'Nothing kept yet · record in FIELD or open a file')
     : S.entries.length
     ? S.entries.length + ' cores · ' + (LOG_MODE ? 'drop to log more' : 'listen, then take what you need')
@@ -2605,6 +2668,7 @@ function tick(now){
     liveTrace.material.opacity = 0.55 + lvl*0.45;
   }
 
+  if (PICK) return;                                             // a picker draws no 3D: the canvas is hidden
   // dust: rises through the lamp cone, wraps at the top
   const dp = dustGeo.attributes.position;
   for (let i = 0; i < DUST; i++){
@@ -2635,16 +2699,22 @@ function tick(now){
 
 /* ═══ BOOT ═══════════════════════════════════════════════════════════════ */
 (async function start(){
+  if (PICK){
+    document.body.dataset.pick = PICK;
+    $('#pickbar').hidden = false;
+    $('#pk-title').textContent = 'Choose a sound for ' + PICK.toUpperCase();
+    $('#pk-cancel').onclick = pickCancel;
+  }
   boot('lattice');
   UI.scale(); resize();
   boot('manifest');
   await loadManifest();
   UI.mode(); UI.region(); UI.transport();
-  if (applyHash()) boot('link');
+  if (!PICK && applyHash()) boot('link');
   requestAnimationFrame(frame);
   requestAnimationFrame(() => { resize(); camPos.copy(wantPos); camAim.copy(wantAim); });
   window.__adit.ready = true;
-  if (LIB) window.__adit.library = {S, Library, sendTo, sendKit, kitOf, MON, meters, setMonitor, renderHeard};   // for end-to-end tests
+  if (LIB) window.__adit.library = {S, Library, sendTo, sendKit, kitOf, MON, meters, setMonitor, renderHeard, pickUse, pickCancel, PICK};   // for end-to-end tests
   boot('ready');
   setTimeout(() => $('#boot').classList.add('done'), 900);
 })();
