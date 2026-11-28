@@ -129,12 +129,23 @@ What you hear is what goes on: **Send to** and **Keep what you hear** render the
 as a 32-bit float stereo WAV (the A/B region only, if one is marked). The ↓ download is always the
 recorded B-format, untouched.
 
-## Keeping a cut
+## Cutting a section
 
-Mark A/B on the ruler (press and hold, then drag), and **Keep A/B** puts exactly that region in the
-library as a new sound, float, with a note of where it came from. Archive cores cut from their float
-master. The original is never touched. **LEVEL** in the deck is listening level only: it changes
-nothing that is kept, sent or downloaded.
+The **Cut** key (scissors, or C) marks a section of the loaded sound between two handles, A and B, on
+the ruler. Drag them, or play and tap **A here** / **B here**. The cut row shows the section's length,
+channels and size, and makes:
+
+- **New sound**: the section as a sound of its own, beside the original (in Workbench it's kept in
+  your library; on the archive site it opens in the log for now). Cut as many as you like.
+- **Download WAV**: the section as a file.
+- **Trim to A/B**: for sounds of your own, the section replaces the original (two taps). The cut is
+  kept first; only then is the original removed.
+
+Every route cuts the recorded samples, every channel, 32-bit float, nothing clamped: a B-format take
+stays four-channel B-format, and if you chose AmbiX or FuMa by hand the cut's name says so, so it opens
+the same way. Archive cores cut from their float master. On the archive site with `?log`, the readout
+warns when a section is over the 25 MiB limit for an archive core. **LEVEL** in the deck is listening
+level only: it changes nothing that is kept, sent or downloaded.
 
 ## Reading local files
 
@@ -163,6 +174,7 @@ picker, so use **Open files** and multi-select from Files.
 | D | download the loaded core |
 | / | jump to search |
 | K | copy a link to this moment |
+| C (or the scissors key) | Cut: A/B handles on the ruler, and New sound · Download WAV · Trim |
 | I / O / X | mark A, mark B, clear |
 | V (or the view key) | READ → DIVE → RACK, with SPACE first for B-format |
 | SPACE: drag the receiver | move where you listen from; drag around it to orbit, double-click to recentre |

@@ -85,6 +85,10 @@ FATHOM depth · ADIT through.)
     to, no Open files. Use posts `wb-pick` to `parent`, to `location.origin` only, with the bytes as stored
     and transferred (a wavetable whole, byte for byte; a marked A/B as a 32-bit float WAV). While framed
     ADIT writes nothing app-wide: no files, no localStorage, no URL hash, no hand-off sweep.
+17. **A cut is the recording.** Cut (New sound, Download WAV, Trim) takes the samples between A and B
+    from the recorded file (an archive core's float master), every channel, as 32-bit float. Trim keeps
+    the cut before it removes the original, and never removes it if the cut couldn't be kept. A cut of
+    a 4-channel take heard as AmbiX or FuMa carries that in its name.
 
 ## Harnesses — run before every commit
 
@@ -94,7 +98,7 @@ node test/boot.js       # evaluates the built file against stubbed GL/Audio/DOM
 node test/decode.js
 node test/manifest.js
 node test/pick.js       # ?pick=<tool> in Workbench's sheet: Use (bytes as stored, waves, A/B), Cancel, origin, nothing written
-node test/library.js    # library mode against a fake OPFS + localStorage: kits, kit hand-off (v2), kinds, wavetables
+node test/library.js    # library mode against a fake OPFS + localStorage: kits, kit hand-off (v2), kinds, wavetables, Cut and Trim
 ```
 
 `boot.js` catches the fault class a syntax check cannot: a deleted function, an

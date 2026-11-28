@@ -209,6 +209,9 @@ class FakeCtx {
   }
   createGain(){ return this._node({gain: param(1)}); }
   createChannelSplitter(){ return this._node(); }
+  createChannelMerger(){ return this._node(); }
+  createPanner(){ return this._node({positionX: param(0), positionY: param(0), positionZ: param(0),
+    orientationX: param(1), orientationY: param(0), orientationZ: param(0), setPosition(){}}); }
   createAnalyser(){
     return this._node({fftSize:2048, smoothingTimeConstant:0,
       getFloatTimeDomainData(a){ for (let i=0;i<a.length;i++) a[i] = Math.sin(i*0.03)*0.5; },

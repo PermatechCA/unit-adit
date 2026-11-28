@@ -129,6 +129,11 @@ for (const [id, slot] of [['t1', 1], ['t2', 2]]){
   put(`shelf/lathe/${id}.json`, JSON.stringify({v: 1, tool: 'lathe', id, file: id + '-table.wav', title: 'Table ' + slot,
     made: new Date(now - 300 - slot).toISOString(), kit: {id: 'k-tables', name: 'Tables', slot}}));
 }
+// a 4-channel B-format take with nothing in its name to say so: the user picks FuMa, then cuts it
+const FOREST = floatWav({rate: 48000, ch: 4, secs: 2});
+put('shelf/sluice/fo1-forest.wav', FOREST);
+put('shelf/sluice/fo1.json', JSON.stringify({v: 1, tool: 'sluice', id: 'fo1', file: 'fo1-forest.wav', title: 'Forest',
+  made: new Date(now - 50).toISOString()}));
 
 const BUILD = {tools: [
   {id: 'ps1', name: 'PS-1', takes: ['audio', 'kit']},
@@ -319,6 +324,56 @@ const isFloatWav = u8 => { const dv = new DataView(u8.buffer, u8.byteOffset, u8.
   const rm = LOG.slice(mark).filter(x => x[0] === 'rm').map(x => x[1].replace('shelf/fathom/', ''));
   const order = ['h1', 'h2', 'h3'].every(id => rm.indexOf(id + '.json') >= 0 && rm.indexOf(id + '.json') < rm.indexOf(id + '.wav'));
   need(!kitRow('fathom:k-harbour') && order && !get('shelf/fathom/h2.wav'), 'Delete kit removes every member, each sidecar before its audio', rm.join(' '));
+}
+
+/* ─── 8  Cut: a section to a new sound, then Trim: all four channels, exact samples, float ─── */
+{
+  await settle(10);
+  const shelfAdit = () => [...((ROOT_DIR.kids.get('shelf') || {kids: new Map()}).kids.get('adit') || {kids: new Map()}).kids.keys()];
+  const sameFrames = (u8, a, frames) => {              // the cut's samples are the source's, frame for frame
+    const src = new DataView(FOREST), cut = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    for (let f = 0; f < frames; f++) for (let c = 0; c < 4; c++)
+      if (cut.getUint32(44 + (f*4 + c)*4, true) !== src.getUint32(44 + ((a + f)*4 + c)*4, true)) return false;
+    return true;
+  };
+  const row = rowEls().find(n => titleOf(n) === 'FOREST');
+  click(row);
+  for (let i = 0; i < 200 && (L.S.busy || (L.S.entries[L.S.current] || {}).title !== 'FOREST'); i++) await settle(10);
+  await settle();
+  L.toggleCut(true);
+  const cutrow = doc.querySelector('#cutrow');
+  const acts = walk(cutrow).map(n => n.attributes['data-cut']).filter(Boolean);
+  need(L.CUT.on && L.S.rgnB > L.S.rgnA && !cutrow.hidden && ['a', 'b', 'new', 'dl', 'trim', 'done'].every(a => acts.includes(a)),
+       'Cut opens with a section marked, and A here · B here · New sound · Download WAV · Trim · Done', acts.join(' '));
+
+  L.MON.mode = 'fuma';                                 // heard as FuMa: the cut must say so
+  L.S.rgnA = 0.5; L.S.rgnB = 1.25;
+  const before = new Set(shelfAdit());
+  await L.cutTo('new');
+  const made = shelfAdit().filter(n => !before.has(n));
+  const wav = made.find(n => n.endsWith('.wav')), side = made.find(n => n.endsWith('.json'));
+  const w = wav && get('shelf/adit/' + wav), j = side && JSON.parse(new TextDecoder().decode(get('shelf/adit/' + side).data));
+  const dv = w && new DataView(w.data.buffer, w.data.byteOffset);
+  need(w && isFloatWav(w.data) && dv.getUint16(22, true) === 4 && (w.data.length - 44) / 16 === 36000 && sameFrames(w.data, 24000, 36000),
+       'New sound: the A/B section, all four channels, 32-bit float, the exact samples', wav);
+  need(j && /^Forest — 00:00\.5\d*–00:01\.25\d* · FuMa$/.test(j.title) && j.tags.includes('cut') && get('shelf/sluice/fo1-forest.wav'),
+       'titled with its span and FuMa, tagged cut; the original untouched', j && (j.title + ' · ' + j.tags));
+
+  L.S.rgnA = 0.25; L.S.rgnB = 0.75;
+  const before2 = new Set(shelfAdit()), mark = LOG.length;
+  await L.cutTo('trim');
+  const made2 = shelfAdit().filter(n => !before2.has(n));
+  const w2 = get('shelf/adit/' + made2.find(n => n.endsWith('.wav')));
+  const j2 = JSON.parse(new TextDecoder().decode(get('shelf/adit/' + made2.find(n => n.endsWith('.json'))).data));
+  const order = LOG.slice(mark).map(x => x[0] + ':' + x[1]);
+  const keptAt = order.findIndex(x => x.startsWith('file:shelf/adit/')), goneAt = order.indexOf('rm:shelf/sluice/fo1.json');
+  for (let i = 0; i < 200 && L.S.busy; i++) await settle(10);
+  need(w2 && (w2.data.length - 44) / 16 === 24000 && sameFrames(w2.data, 12000, 24000) && j2.title === 'Forest · FuMa'
+       && !get('shelf/sluice/fo1-forest.wav') && !get('shelf/sluice/fo1.json') && keptAt >= 0 && goneAt > keptAt,
+       'Trim keeps the section first, then removes the original', order.join(' '));
+  const cur = L.S.entries[L.S.current] || {};
+  need(cur.title === 'FOREST · FUMA' && L.MON.mode === 'fuma' && !L.CUT.on && !rowEls().some(n => titleOf(n) === 'FOREST'),
+       'the trimmed sound takes its place, opens as FuMa, and Cut closes', `${cur.title} · ${L.MON.mode}`);
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');

@@ -466,7 +466,7 @@ function speaker(ctx, u, out){
   sum.connect(pn); pn.connect(out);
   return [sum, pn];
 }
-const AMBI_RE = /ambix|ambisonic|\bfoa\b|b-?format|h3-?vr|nt-?sf1/i;
+const AMBI_RE = /ambix|ambisonic|\bfoa\b|b-?format|fuma|h3-?vr|nt-?sf1/i;
 const SPK = [];
 for (const x of [1,-1]) for (const y of [1,-1]) for (const z of [1,-1]) SPK.push([x/Math.sqrt(3), y/Math.sqrt(3), z/Math.sqrt(3)]);
 
@@ -1237,7 +1237,7 @@ const el = {
   ctx:$('#s-ctx'), tp:$('#s-tp'), coll:$('#s-coll'), count:$('#s-count'), hint:$('#s-hint'),
   stamp:$('#stamp'), stTitle:$('#st-title'), stMeta:$('#st-meta'), label:$('#label'),
   gain:$('#gain'), cgain:$('#c-gain'), barL:$('#bar-l'), barR:$('#bar-r'), scale:$('#scale'),
-  search:$('#search'), dl:$('#k-dl'), send:$('#sendkeys'), sendrow:$('#sendrow'), link:$('#k-link'), zone:$('#loopzone'), rgn:$('#rgn'), mm:[$('#mm-l > u'), $('#mm-r > u')], tabs:$('#tabs'),
+  search:$('#search'), dl:$('#k-dl'), send:$('#sendkeys'), sendrow:$('#sendrow'), link:$('#k-link'), zone:$('#loopzone'), rgn:$('#rgn'), cutrow:$('#cutrow'), cutKey:$('#k-cut'), ha:$('#h-a'), hb:$('#h-b'), mm:[$('#mm-l > u'), $('#mm-r > u')], tabs:$('#tabs'),
   actrow:$('#actrow'), monrow:$('#monrow')
 };
 const ictx = el.env.getContext('2d');
@@ -1324,8 +1324,26 @@ const UI = {
       el.zone.style.left = (S.rgnA/d*100) + '%';
       el.zone.style.width = ((S.rgnB - S.rgnA)/d*100) + '%';
       el.rgn.textContent = 'A/B ' + clock(S.rgnA).slice(0,8) + '–' + clock(S.rgnB).slice(0,8);
+      el.ha.style.left = (S.rgnA/d*100) + '%'; el.hb.style.left = (S.rgnB/d*100) + '%';
     } else el.rgn.textContent = '';
-    if (!marking) UI.actions();
+    const info = $('#cutinfo'); if (info) info.textContent = cutInfo();
+    if (!marking && !hdrag) UI.actions();
+  },
+
+  /* CUT: the A/B handles on the ruler, and what can be made from the section between them. */
+  cut(){
+    const e = S.entries[S.current];
+    const on = CUT.on && !!A.buffer && !!e;
+    document.body.classList.toggle('cutting', on);
+    el.cutKey.setAttribute('aria-pressed', String(on));
+    el.cutrow.hidden = !on;
+    if (!on){ el.cutrow.innerHTML = ''; return; }
+    const k = (a, t, x = '') => `<button class="act${x}" type="button" data-cut="${a}">${t}</button>`;
+    el.cutrow.innerHTML = '<span>Cut</span><b id="cutinfo"></b>' + k('a', 'A here') + k('b', 'B here') +
+      (PICK ? '' : k('new', 'New sound') + k('dl', 'Download WAV') +
+                   (e.local ? k('trim', 'Trim to A/B', ' warn') : '')) +
+      k('done', 'Done');
+    $('#cutinfo').textContent = cutInfo();
   },
 
   mode(){
@@ -1342,6 +1360,7 @@ const UI = {
 
   transport(){
     const has = !!A.buffer;
+    el.cutKey.disabled = !has;
     el.play.innerHTML = A.playing ? PAUSE_ICON : PLAY_ICON;
     el.play.setAttribute('aria-label', A.playing ? 'Pause' : 'Play');
     el.play.disabled = !has;
@@ -1390,7 +1409,6 @@ const UI = {
     const rgn = S.rgnA != null && S.rgnB > S.rgnA;
     const keys = [];
     if (has && e.local) keys.push(['rename', 'Rename'], ['delete', 'Delete']);
-    if (has && rgn) keys.push(['keepab', 'Keep A/B']);
     if (has && ambiOn()) keys.push(['keepheard', rgn ? 'Keep A/B as heard' : 'Keep what you hear']);
     el.actrow.hidden = !keys.length;
     if (!keys.length){ delete el.actrow.dataset.mode; return; }
@@ -1505,7 +1523,7 @@ async function selectEntry(i, opt = {}){
   if (!e || S.busy) return;
   stop();
   S.current = i; S.busy = true; e.touched = performance.now();
-  clearRegion(); UI.actions();
+  CUT.on = false; clearRegion(); UI.actions(); UI.cut();
   if (!e.local && !FRAMED) history.replaceState(null, '', hashFor(e, i, false));
   UI.rows(); UI.transport(); UI.stamp(e);
   el.state.textContent = 'LOGGING';
@@ -1531,7 +1549,8 @@ async function selectEntry(i, opt = {}){
     setTrim(parseFloat(el.gain.value));
     const nch = d.ab.numberOfChannels;
     MON.on = Array.from({length: nch}, () => true); MON.yaw = 0; MON.pitch = 0; MON.pos = [0, 0, 0];
-    MON.mode = nch === 4 && AMBI_RE.test(e.title + ' ' + nameOf(e)) ? 'ambix' : 'mix';
+    const said = e.title + ' ' + nameOf(e);
+    MON.mode = nch === 4 && AMBI_RE.test(said) ? (/fuma/i.test(said) ? 'fuma' : 'ambix') : 'mix';
     buildMonitor(nch);
     buildCore(e.log);
 
@@ -1849,7 +1868,7 @@ function endRuler(){
     marking = false;
     if (S.rgnB - S.rgnA < 0.12){ clearRegion(); el.hint.textContent = 'A/B cleared'; }
     else { seek(S.rgnA); el.hint.textContent = 'A/B set — loop confines playback to it'; }
-    UI.actions();                                   // KEEP A/B appears once the region is let go
+    UI.actions();
   }
   rulerDown = false;
 }
@@ -1997,6 +2016,116 @@ el.actrow.addEventListener('keydown', ev => {
   if (ev.key === 'Enter'){ ev.preventDefault(); commitRename(); }
   if (ev.key === 'Escape'){ delete el.actrow.dataset.mode; UI.actions(); }
 });
+/* ─ CUT: a section between A and B, made into a new sound, a download, or the sound itself (Trim).
+     Every route cuts from the recorded samples (an archive core from its float master), all channels,
+     32-bit float, nothing clamped. A B-format cut says which order it is in, so it opens as B-format. ─ */
+const CUT = {on: false};
+const CUT_MIN = 0.01;
+const ARCHIVE_MAX = 25 * 1024 * 1024;                 // Cloudflare's per-file asset limit: an archive core's ceiling
+let hdrag = null, trimTimer = null, cutting = false;
+function cutSpan(){ return S.rgnA != null && S.rgnB - S.rgnA >= CUT_MIN ? [S.rgnA, S.rgnB] : null; }
+function cutInfo(){
+  const r = cutSpan(), e = S.entries[S.current];
+  if (!r || !A.buffer || !e) return 'Drag A and B on the ruler';
+  const rate = (e.decoded && e.decoded.rate) || A.buffer.sampleRate, n = A.buffer.numberOfChannels;
+  const size = 44 + Math.round((r[1] - r[0]) * rate) * n * 4;
+  return clock(r[0]).slice(0, 9) + ' – ' + clock(r[1]).slice(0, 9) + ' · ' + (r[1] - r[0]).toFixed(2) + ' s · ' +
+    n + ' ch · ' + bytes(size) + (!LIB && LOG_MODE && size > ARCHIVE_MAX ? ' · over the 25 MiB archive limit' : '');
+}
+function toggleCut(on = !CUT.on){
+  if (!A.buffer){ CUT.on = false; UI.cut(); return; }
+  CUT.on = on;
+  if (on && !cutSpan()){                              // start with ten seconds from the play head, inside the sound
+    const d = A.buffer.duration, len = Math.min(10, d * 0.25, d);
+    const a = clamp(position(), 0, Math.max(0, d - len));
+    setRegion(a, a + len);
+  }
+  UI.cut(); UI.region(); UI.actions();
+  el.hint.textContent = on ? 'Drag A and B · play to hear the section · L loops it' : 'A/B kept';
+  frameRead();
+}
+el.cutKey.addEventListener('click', () => toggleCut());
+for (const h of [el.ha, el.hb]){
+  h.addEventListener('pointerdown', ev => {
+    if (!A.buffer) return;
+    ev.stopPropagation(); ev.preventDefault();
+    h.setPointerCapture(ev.pointerId); hdrag = h.dataset.h;
+    h.classList.add('drag');
+  });
+  h.addEventListener('pointermove', ev => {
+    if (hdrag !== h.dataset.h) return;
+    const t = tAt(ev);
+    if (hdrag === 'a') setRegion(Math.min(t, S.rgnB - CUT_MIN), S.rgnB);
+    else setRegion(S.rgnA, Math.max(t, S.rgnA + CUT_MIN));
+  });
+  const up = () => {
+    if (hdrag !== h.dataset.h) return;
+    h.classList.remove('drag');
+    seek(hdrag === 'a' ? S.rgnA : Math.max(S.rgnA, S.rgnB - 2));   // hear the edge you just moved
+    hdrag = null; UI.actions();
+  };
+  h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
+}
+function saveBlob(blob, name){
+  const a = document.createElement('a'), href = URL.createObjectURL(blob);
+  a.href = href; a.download = name; a.style.display = 'none';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 60000);
+}
+async function cutTo(kind){
+  const i = S.current, e = S.entries[i], r = cutSpan();
+  if (!e || !A.buffer || !r || cutting) return;
+  cutting = true;
+  const span = clock(r[0]).slice(0, 8) + '–' + clock(r[1]).slice(0, 8);
+  const given = e.given || e.title;
+  const ambi = MON.n === 4 && MON.mode !== 'mix' && !AMBI_RE.test(given + ' ' + nameOf(e))
+    ? (MON.mode === 'fuma' ? ' · FuMa' : ' · AmbiX') : '';
+  try {
+    el.hint.textContent = (e.masterUrl ? 'Pulling the float master · ' : '') + 'Cutting ' + span;
+    const {chans, rate} = await Library.samplesOf(e);
+    const a = Math.max(0, Math.floor(r[0] * rate)), b = Math.min(chans[0].length, Math.ceil(r[1] * rate));
+    if (b <= a) throw new Error('nothing between A and B');
+    const data = wavFloat(chans.map(c => c.subarray(a, b)), rate);
+    const title = kind === 'trim' ? given + ambi : given + ' — ' + span + ambi;
+    const name = title.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) + '.wav';
+    if (kind === 'dl'){
+      saveBlob(new Blob([data], {type: 'audio/wav'}), name);
+      el.hint.textContent = 'Saved ' + name + ' · ' + bytes(data.byteLength);
+      return;
+    }
+    const file = new File([data], name, {type: 'audio/wav'});
+    const from = e.source || (e.id ? {tool: 'archive', id: e.id} : undefined);
+    const fresh = await addFiles([file], {select: false, meta: {title, from,
+      tags: kind === 'trim' ? ['trimmed'] : ['cut'], category: String(e.cat || 'FIELD').toLowerCase(),
+      notes: (kind === 'trim' ? 'Trimmed to ' : 'Cut ') + span + ' of ' + given}});
+    const made = fresh && fresh[0];
+    if (!made) throw new Error('could not make it');
+    if (kind === 'new'){ el.hint.textContent = 'New sound: ' + made.title + ' · ' + bytes(data.byteLength); return; }
+    /* Trim: the cut takes the original's place. Only once the cut is safely kept is the original removed. */
+    if (LIB && !made.src) throw new Error('this browser cannot keep files, so the original stays');
+    if (e.src) await Library.remove(e);
+    dropEntry(S.entries.indexOf(e));
+    CUT.on = false;
+    await selectEntry(S.entries.indexOf(made));
+    el.hint.textContent = 'Trimmed to ' + span + ' · ' + bytes(data.byteLength);
+  } catch (err){ el.hint.textContent = 'Could not cut — ' + (err.message || err); }
+  finally { cutting = false; }
+}
+el.cutrow.addEventListener('click', ev => {
+  const b = ev.target.closest('[data-cut]'); if (!b) return;
+  const act = b.dataset.cut;
+  if (act === 'a'){ if (A.buffer) setRegion(Math.min(position(), S.rgnB - CUT_MIN), S.rgnB); return; }
+  if (act === 'b'){ if (A.buffer) setRegion(S.rgnA, Math.max(position(), S.rgnA + CUT_MIN)); return; }
+  if (act === 'done'){ toggleCut(false); return; }
+  if (act === 'trim' && !b.classList.contains('armed')){        // two taps: the second one trims
+    b.classList.add('armed'); b.textContent = 'Tap again: replace the original';
+    clearTimeout(trimTimer); trimTimer = setTimeout(() => UI.cut(), 5000);
+    return;
+  }
+  clearTimeout(trimTimer);
+  cutTo(act);
+});
+
 /* A new sound from this one, kept in the library beside it: the A/B region as recorded, or (for
    B-format) what you hear at the receiver, as stereo. Float in, float out; nothing clamped. */
 let keeping = false;
@@ -2004,7 +2133,7 @@ async function keepCut(kind){
   const e = S.entries[S.current];
   if (!e || !A.buffer || keeping) return;
   const region = (S.rgnA != null && S.rgnB > S.rgnA) ? [S.rgnA, S.rgnB] : null;
-  const span = region ? clock(region[0]).slice(3, 8) + '–' + clock(region[1]).slice(3, 8) : '';
+  const span = region ? clock(region[0]).slice(0, 8) + '–' + clock(region[1]).slice(0, 8) : '';
   keeping = true;
   try {
     let chans, rate, title, tags, notes;
@@ -2061,6 +2190,7 @@ addEventListener('keydown', ev => {
     case 'ArrowUp':    ev.preventDefault(); step(-1); break;
     case 'ArrowDown':  ev.preventDefault(); step(1); break;
     case 'l': case 'L': $('#k-loop').click(); break;
+    case 'c': case 'C': toggleCut(); break;
     case 'd': case 'D': if (S.current >= 0) download(S.current); break;
     case 'k': case 'K': copyLink(); break;
     case 'i': case 'I': if (A.buffer) setRegion(position(), S.rgnB != null ? S.rgnB : A.buffer.duration); break;
@@ -2100,7 +2230,7 @@ async function filesFromDrop(dt){
 async function addFiles(files, opt = {}){
   const keep = [...files].filter(f => AUDIO_RE.test(f.name))
     .sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric:true}));
-  if (!keep.length){ el.hint.textContent = 'No audio in that drop'; return; }
+  if (!keep.length){ el.hint.textContent = 'No audio in that drop'; return []; }
   const fresh = [];
   let kept = 0, missed = 0;
   for (const f of keep){
@@ -2136,9 +2266,10 @@ async function addFiles(files, opt = {}){
     if (cur && cur.log){ let cs = 0, es = 0;
       for (let k = 0; k < SLICES; k++){ cs += cur.log.cen[k]*cur.log.rmsN[k]; es += cur.log.rmsN[k]; }
       tintRack(S.current, mineral(es > 0 ? cs/es : 400, 0.55).clone()); }
-    return;
+    return fresh;
   }
   selectEntry(first);
+  return fresh;
 }
 const dropEl = $('#drop');
 let dragDepth = 0;
@@ -2714,7 +2845,7 @@ function tick(now){
   requestAnimationFrame(frame);
   requestAnimationFrame(() => { resize(); camPos.copy(wantPos); camAim.copy(wantAim); });
   window.__adit.ready = true;
-  if (LIB) window.__adit.library = {S, Library, sendTo, sendKit, kitOf, MON, meters, setMonitor, renderHeard, pickUse, pickCancel, PICK};   // for end-to-end tests
+  if (LIB) window.__adit.library = {S, Library, sendTo, sendKit, kitOf, MON, meters, setMonitor, renderHeard, pickUse, pickCancel, PICK, CUT, toggleCut, cutTo};   // for end-to-end tests
   boot('ready');
   setTimeout(() => $('#boot').classList.add('done'), 900);
 })();
